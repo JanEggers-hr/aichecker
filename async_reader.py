@@ -1,5 +1,3 @@
-import json
-
 # Define the global posts list
 posts = []
 
@@ -68,7 +66,11 @@ def on_message_handler(message):
 
 def main():
     client.start(on_message_handler)
+    
     return
+
+
+
 
 
 
