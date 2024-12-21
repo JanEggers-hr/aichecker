@@ -4,11 +4,11 @@ from atproto import Client, models
 
 def fetch_user_posts(handle: str, limit: int = 100) -> list:
     # Initialize the Bluesky client (unauthenticated)
-    client = Client()
+    client = Client(base_url="https://api.bsky.app")
 
     try:
         # Fetch the user ID from the handle
-        profile = client.get_profile(handle)
+        profile = client.app.bsky.actor.get_profile({'actor': handle})
         user_id = profile.did
         
         # Initialize an empty list to store posts
@@ -17,11 +17,31 @@ def fetch_user_posts(handle: str, limit: int = 100) -> list:
         # Fetch timeline for the user (latest posts first)
         cursor = None
         while len(posts) < limit:
-            feed = client.app.bsky.feed.get_author_feed(actor=user_id, limit=min(limit - len(posts), 50), cursor=cursor)
-            if not feed.posts:
+            feed = client.app.bsky.feed.get_author_feed({'actor':user_id, 
+                                                        'limit':min(limit - len(posts), 50), 
+                                                        'cursor':cursor,
+                                                        })
+            if not feed['feed']:
                 break
-            posts.extend(feed.posts)
-            cursor = feed.cursor
+            for item in feed['feed']:
+                # Extract basic post information
+                post_data = {
+                    'author_handle': getattr(item[0][1], 'handle', ''),
+                    'author_display_name': getattr(item[0][1], 'display_name', ''),
+                    'author_did': getattr(item[0][1], 'did', ''),
+                    'created_at': getattr(item[3], 'created_at', ''),
+                    'indexed_at': item[2],
+                    'text': getattr(item[3], 'text', ''),
+                    'uri': item[4],
+                    'cid': item[1],
+                    'like_count': item[8],
+                    'reply_count': item[10],
+                    'repost_count': item[11],
+                    'quote_count': item[9],
+                    'language': getattr(item[3], 'langs', [''])[0] if hasattr(item[3], 'langs') else ''
+                }
+                posts.append(post_data)
+            cursor = len(feed['feed'])
         
         return posts[:limit]
     
@@ -31,7 +51,8 @@ def fetch_user_posts(handle: str, limit: int = 100) -> list:
 
 def main():
     # Define the Bluesky handle and number of posts to fetch
-    handle = '@lion-c.bsky.social'  # Replace with the desired handle
+    # Remove the @ before handle strings
+    handle = 'lion-c.bsky.social'  # Replace with the desired handle
     limit = 100
 
     # Fetch the last 100 posts from the specified user
