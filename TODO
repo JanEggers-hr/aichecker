@@ -1,0 +1,16 @@
+# App: Chemtrail
+
+## Auswertung
+- Anzahl verdächtige Texte
+- Anzahl verdächtige Bilder
+- Check bis Datum
+
+## UI
+- Dash-App
+- Eingabe eines Bluesky-Accounts
+    - Konto suchen
+    - NTH: Infocard und letzte Posts rendern
+    - File mit Ergebnissen letzter Check suchen, sonst 20 Posts
+- Anzeige Ergebnisse letzter Check
+- Neue Posts holen und auswerten
+- CSV aktualisieren und Download-Link anbieten

@@ -12,18 +12,18 @@ Das Fernziel ist eine Recherche zu KI-Inhalten im Wahlkampf mit zwei Stoßrichtu
 
 ### Phase 1: Bluesky
 
-- Bluesky-API anschauen 
 - Beliebiges Account vier Wochen scannen
 - AIorNot-API einbauen https://docs.aiornot.com/
-    - Bilder checken
     - Videos checken:
         - Audiospur extrahieren
         - Audiospur checken
 - hive-API einbauen 
-- Detectora-API einbauen
 - Ausgabe: Vermuteter KI-Anteil 
 
-### Phase 2: 4CAT
+### Phase 2: Chemtrail App
+- Dash-App auf dem Server zum Check eines Handles
+
+### Phase 3: 4CAT
 - 4CAT-Server aufsetzen
 - "processor" für KI-Check einbauen
 - 
