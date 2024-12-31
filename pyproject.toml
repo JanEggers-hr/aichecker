@@ -4,6 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aichecker"
+authors = [
+  {name = "Jan Eggers", email = "jan.eggers@hr.de"},
+]
+maintainers = [
+  {name = "Jan Eggers", email = "jan.eggers@hr.de"},
+]
 version = "0.1.0"
 description = "Bluesky-Konten auf KI-Inhalte checken"
 requires-python = ">=3.8"
@@ -12,6 +18,8 @@ dependencies = [
     "openai", # für die Bildbeschreibung
     "ollama", # für die Bildbeschreibung
 ]
+readme="README.md"
+license = {file = "LICENSE"}
 
 [project.optional-dependencies]
 dev = [
