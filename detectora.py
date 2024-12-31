@@ -24,6 +24,8 @@ import os
 api_url = "https://backendkidetektor-apim.azure-api.net/watson"
 
 def query_detectora(text):
+    if text == '':
+        return None
     data = {
         'query': text,
     }
@@ -41,7 +43,7 @@ def query_detectora(text):
             # Success
             return response.json()['fake_probability']
         elif response.status_code == 400:
-            print("DETECTORA: Fehlerhafte API-Anfrage")
+            print(f"DETECTORA: Fehlerhafte API-Anfrage: \'{data['query']}\'")
             return None
         elif response.status_code == 401:
             print(f"DETECTORA-API-Key 'api_key' nicht gültig")

@@ -1,9 +1,5 @@
 # App: Chemtrail
 
-## Auswertung
-- Anzahl verdächtige Texte
-- Anzahl verdächtige Bilder
-- Check bis Datum
 
 ## UI
 - Dash-App
@@ -14,3 +10,10 @@
 - Anzeige Ergebnisse letzter Check
 - Neue Posts holen und auswerten
 - CSV aktualisieren und Download-Link anbieten
+
+## Telegram
+- Umbau auf Telegram-Channel
+
+## 4CAT
+- 4Cat-Server aufsetzen
+- "Processor" schreiben
