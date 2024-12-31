@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "aichecker"
@@ -25,6 +25,10 @@ license = {file = "LICENSE"}
 dev = [
     "pytest",
 ]
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--strict-markers"
+testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/aichecker"]

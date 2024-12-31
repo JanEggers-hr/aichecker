@@ -1,5 +1,10 @@
 # detectora.py Library - CC-BY github.com/JanEggers-hr
 """
+Spinoff einer Masterarbeit von Tom Tlok. Letzten Endes ein feingetuntes und gegen 
+Angriffe gehärtetes BERT, das vor allem auf die sehr KI-typischen Eigenheiten in 
+Satzbau und Wortwahl zu achten scheint. Trainiert auf die gängigen Modelle.
+Mehr hier: https://ki.fh-wedel.de/files/TomTlok_MA.pdf 
+
 Eine Python-Bibliothek, um mit detectora.de auf KI-generierten Text zu prüfen. 
 
 PARAMETER: text
