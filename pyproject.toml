@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aichecker"
+version = "0.1.0"
+description = "Bluesky-Konten auf KI-Inhalte checken"
+requires-python = ">=3.8"
+dependencies = [
+    "requests", # Alle bsky-Calls über Requests
+    "openai", # für die Bildbeschreibung
+    "ollama", # für die Bildbeschreibung
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

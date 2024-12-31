@@ -5,9 +5,9 @@
 
 import json
 import pandas as pd
-from detectora import query_detectora
-from imagecheck import query_aiornot
-from bildbeschreibung import gpt4_description
+from .detectora import query_detectora
+from .imagecheck import query_aiornot
+from .bildbeschreibung import gpt4_description
 import requests
 import os
 

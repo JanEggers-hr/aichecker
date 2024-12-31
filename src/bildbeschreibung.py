@@ -1,8 +1,5 @@
-import re
-import locale
 import ollama
 from openai import OpenAI
-import whisper
 from pathlib import Path
 import os
 import base64
