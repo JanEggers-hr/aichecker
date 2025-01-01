@@ -181,10 +181,12 @@ def check_handle(handle:str, limit:int = 20, cursor = None, check_images = True)
         print("Checke Texte:")
         df['detectora_ai_score'] = df['text'].apply(detectora_wrapper)
     
-    # Now add "ai" or "human" assessment for images 
+    # Now add "ai" or "human" assessment for images
     if check_images:
         print("\nChecke Bilder:")
         df['aiornot_ai_score'] = df.apply(lambda row: aiornot_wrapper(row['author_did'], row['embed']), axis=1)
+    else:
+        df['aiornot_ai_score'] = None
     print()
     return df
 
