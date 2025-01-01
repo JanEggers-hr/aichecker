@@ -160,7 +160,7 @@ def fetch_user_posts(handle: str, limit: int = 100) -> list:
     
     return posts[:limit]
         
-def check_handle(handle:str, limit:int = 20):
+def check_handle(handle:str, limit:int = 20, cursor = None):
     # Konto und Anzahl der zu prüfenden Posts
     if handle == '':
         return None
@@ -168,7 +168,7 @@ def check_handle(handle:str, limit:int = 20):
         handle = handle[1:]
 
     # Fetch the most recent posts from the specified user
-    posts = fetch_user_posts(handle, limit)
+    posts = fetch_user_posts(handle, limit, cursor)
 
     if not posts:
         print(f"Keine Posts im Feed für Handle {handle}.")
