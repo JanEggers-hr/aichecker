@@ -159,7 +159,7 @@ def fetch_user_posts(handle: str, limit: int = 100, cursor = None) -> list:
     
     return posts[:limit]
         
-def check_handle(handle:str, limit:int = 20, cursor = None):
+def check_handle(handle:str, limit:int = 20, cursor = None, check_images = True):
     # Konto und Anzahl der zu prüfenden Posts
     if handle == '':
         return None
@@ -177,12 +177,14 @@ def check_handle(handle:str, limit:int = 20, cursor = None):
     df = pd.DataFrame(posts)
 
     # Now add probability check for each post text
-    print("Checke Texte:")
-    df['detectora_ai_score'] = df['text'].apply(detectora_wrapper)
+    if True: 
+        print("Checke Texte:")
+        df['detectora_ai_score'] = df['text'].apply(detectora_wrapper)
     
     # Now add "ai" or "human" assessment for images 
-    print("\nChecke Bilder:")
-    df['aiornot_ai_score'] = df.apply(lambda row: aiornot_wrapper(row['author_did'], row['embed']), axis=1)
+    if check_images:
+        print("\nChecke Bilder:")
+        df['aiornot_ai_score'] = df.apply(lambda row: aiornot_wrapper(row['author_did'], row['embed']), axis=1)
     print()
     return df
 
