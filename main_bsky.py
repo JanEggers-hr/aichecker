@@ -2,7 +2,7 @@
 #
 # 12-2024 Jan Eggers
 
-from src.check_bsky import *
+from src.aichecker.check_bsky import *
 
 # Konstante 
 d_thresh = .8 # 80 Prozent 
@@ -38,10 +38,10 @@ if __name__ == "__main__":
     # - 'aiornot_ai_score': 
     df = check_handle(author, limit = limit)
     n_posts = len(df)
-    print(f'\n\nAnalyse des Kontos @{handle} ({profile['displayName']}) seit {profile['createdAt']}- {profile['followersCount']} Follower')
-    print(f'{profile.get('description','---')}\n')
+    print(f"\n\nAnalyse des Kontos @{handle} ({profile['displayName']}) seit {profile['createdAt']} - {profile['followersCount']} Follower")
+    print(f"{profile.get('description','---')}\n")
     print(f'Anzahl der analysierten Posts: {n_posts}')
-    print(f"Durchschnittliche KI-Text-Wahrscheinlichkeit: {df['detectora_ai_score'].mean()}")
+    print(f"Durchschnittliche KI-Text-Wahrscheinlichkeit: {df['detectora_ai_score'].mean()*100:.2f}%")
     detectora_posts_df = df[df['detectora_ai_score'] >= d_thresh]
     print(f"Anzahl von Posts über einer detectora-Schwelle von {d_thresh*100:.1f}%: {len(detectora_posts_df)}")
     image_posts = [post for post in df['aiornot_ai_score'].to_list() if post is not None]
