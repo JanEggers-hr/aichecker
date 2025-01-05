@@ -1,6 +1,6 @@
 # imagecheck.py
 # Erfragt KI-Wahrscheinlichkeit für ein Bild über Hive- und AIorNot-API
-from .bildbeschreibung import ai_description
+from .transcribe import ai_description
 
 import requests
 import json
