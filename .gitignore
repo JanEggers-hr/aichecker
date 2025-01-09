@@ -1,5 +1,7 @@
 # Runtime results
 bsky-checks/
+media/
+tg-checks/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

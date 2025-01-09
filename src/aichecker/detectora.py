@@ -35,6 +35,9 @@ def query_detectora(text):
         'query': text,
     }
     api_key = os.environ.get('DETECTORA_API_KEY')
+    if api_key is None or api_key == "":
+        print("DETECTORA_API_KEY ist nicht gesetzt")
+        return None
     headers = {
         'APIKey': api_key,
         'Content-Type': 'application/json',
@@ -51,9 +54,9 @@ def query_detectora(text):
             print(f"DETECTORA: Fehlerhafte API-Anfrage: \'{data['query']}\'")
             return None
         elif response.status_code == 401:
-            print(f"DETECTORA-API-Key 'api_key' nicht gültig")
+            print(f"DETECTORA_API_KEY {api_key} nicht gültig")
+            return None
     except Exception as e:
         print("Fehler beim Verbinden mit der DETECTORA-API:", str(e))
         return None
-    return response['']
     

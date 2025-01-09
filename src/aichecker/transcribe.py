@@ -23,7 +23,8 @@ OLLAMA = False
 
 def gpt4_description(image_url):
     # Check a local image by converting it to b64: 
-    # image_url = f"data:image/jpeg;base64,{b64_image}"
+    # image_url = f"data:image/jpeg;base64, {b64_image}"
+    print(".", end="")
     response = client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[
@@ -80,10 +81,16 @@ def transcribe(audio):
 
 def transcribe_whisper(fname, model="large-v3-turbo"):
     # Vanilla Whisper. Womöglich nicht die schnellste Lösung. 
+    # Installiere einfach mit 
+    # pip install openai-whisper
+    print(".",end="")
     stt = whisper.load_model(model)
     result = stt.transcribe(fname)
     return result['text']
 
+# Hier fangen die Alternativ-Transcriber an. Sind auskommentiert, damit man den ganzen Kram
+# nicht installieren muss, bevor das Paket losläuft. 
+"""
 def transcribe_jax(audio):
     # Nutzt nicht die Standard-Whisper-Bibliothek zum Transkribieren, 
     # sondern das verbesserte JAX - das beim ersten Durchlauf sehr langsam ist, 
@@ -98,6 +105,7 @@ def transcribe_jax(audio):
     # Speichert die Modelle unter ~/.cache/whisper/ ab; da auf meinem Mac schon Whisper-Modelle
     # geladen sind, nutze ich den zusätzlichen Parameter 
     # download_root="{path to the directory to download models}"
+    #
     from whisper_jax import FlaxWhisperPipline
     from typing import NamedType
 
@@ -108,21 +116,26 @@ def transcribe_jax(audio):
 
     return text
 
+# Library importieren mit
+# pip install whisper-s2t
+# oder
+# pip install -U git+https://github.com/shashikg/WhisperS2T.git
+#
+# Problem mit Whisper: setzt auf dem Mac eine METAL-Einbindng voraus. 
+# https://github.com/shashikg/WhisperS2T
 import os
 import whisper_s2t
 
 def transcribe_ws2t(file_path, model_name="large-v3-turbo", output_format="txt"):
-    """
-    Transcribe an audio/video file using WhisperS2T.
-    
-    Args:
-        file_path (str): Path to the .ogg or .mp4 file.
-        model_name (str): Whisper model to use (e.g., "small", "medium", "large").
-        output_format (str): Output format ("txt" or "json").
-        
-    Returns:
-        str: Transcription text.
-    """
+#    Transcribe an audio/video file using WhisperS2T.
+#    
+#    Args:
+#       file_path (str): Path to the .ogg or .mp4 file.
+#        model_name (str): Whisper model to use (e.g., "small", "medium", "large").
+#        output_format (str): Output format ("txt" or "json").
+#        
+#    Returns:
+#        str: Transcription text.
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
     
@@ -141,3 +154,4 @@ def transcribe_ws2t(file_path, model_name="large-v3-turbo", output_format="txt")
 
     return out
 
+"""

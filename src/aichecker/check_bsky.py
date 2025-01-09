@@ -5,54 +5,14 @@
 
 import json
 import pandas as pd
-from .detectora import query_detectora
-from .imagecheck import query_aiornot
 from .transcribe import gpt4_description
+from .check_wrappers import bsky_aiornot_wrapper, detectora_wrapper
 import requests
 import os
 
 # Konstante 
 d_thresh = .8 # 80 Prozent 
 limit = 25 # Posts für den Check
-
-def detectora_wrapper(text: str):
-    # Verpackung. Fügt nur den "Fortschrittsbalken" hinzu. 
-    print("?", end="")
-    score = query_detectora(text)
-    if score is None:
-        print("\b_",end="")
-    else: 
-        print(f"\b{'X' if score >= d_thresh else '.'}",end="")
-    return score
-        
-def aiornot_wrapper(did,embed):
-    # Verpackung für die AIORNOT-Funktion: 
-    # Checkt, ob es überhaupt ein Embed gibt, 
-    # und ob es ein Bild enthält.
-    # Wenn ja: geht durch die Bilder und erstellt KI-Beschreibung und KI-Einschätzung
-    print("?",end="")
-    if 'images' in embed:
-        images = embed['images']
-        desc = []
-        for i in images:
-            # Construct an URL for the image thumbnail (normalised size)
-            link = i['image']['ref']['$link']
-            i_url = f"https://cdn.bsky.app/img/feed_thumbnail/plain/{did}/{link}"
-            aiornot_report = query_aiornot(i_url)
-            # Beschreibung: https://docs.aiornot.com/#5b3de85d-d3eb-4ad1-a191-54988f56d978 
-            gpt4_desc = gpt4_description(i_url)        
-            desc.append({
-                'link_id': link,
-                'aiornot_score': aiornot_report['verdict'],
-                'aiornot_confidence': aiornot_report['ai']['confidence'],
-                'aiornot_generator': aiornot_report['generator'],
-                'gpt4_description': gpt4_desc,
-            })
-        print(f"\b{'X' if aiornot_report['verdict'] != 'human' else '.'}",end="")
-        return desc
-    else:
-        print("\b_",end="")
-        return None
         
 def call_get_author_feed(author: str, limit: int=50, cursor= None) -> list:
     # Sucht den Post-Feed für das Bluesky-Konto author
@@ -184,7 +144,7 @@ def check_handle(handle:str, limit:int = 20, cursor = None, check_images = True)
     # Now add "ai" or "human" assessment for images
     if check_images:
         print("\nChecke Bilder:")
-        df['aiornot_ai_score'] = df.apply(lambda row: aiornot_wrapper(row['author_did'], row['embed']), axis=1)
+        df['aiornot_ai_score'] = df.apply(lambda row: bsky_aiornot_wrapper(row['author_did'], row['embed']), axis=1)
     else:
         df['aiornot_ai_score'] = None
     print()

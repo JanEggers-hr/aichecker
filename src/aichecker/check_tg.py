@@ -14,6 +14,7 @@ import os
 import re
 import base64
 from .transcribe import gpt4_description, transcribe
+from .check_wrappers import detectora_wrapper, aiornot_wrapper
 
 def extract_k(n_str: str):
     try: 
@@ -31,7 +32,14 @@ def tgc_profile(channel="telegram"):
     channel (str)
 
     Returns:
-    dict with the keys 'subscribers', 'photos', 'videos', 'links'
+    dict with the keys 
+    - 'channel'
+    - 'description'
+    - 'subscribers', (Number)
+    - 'photos' (number)
+    - 'videos' (number)
+    - 'links' (number)
+    - 'n_posts' (number of the last published post)
 
     Example: 
     profile = tgc_profile("wilhelmkachel")
@@ -134,6 +142,11 @@ def tg_post_parse(b, save = True, describe = True):
     # Text
     if b.select_one("div.tgme_widget_message_text_wrap") is not None:
         text = b.select_one("div.tgme_widget_message_text").get_text()
+    # Polls: Text der Optionen extrahieren
+    elif b.select_one("div.tgme_widget_message_poll") is not None:
+        text = b.select_one("div.tgme_widget_message_poll_question").get_text()
+        for bb in b.select("div.tgme_widget_message_poll_option_text"):
+            text += "\n* " + bb.get_text() 
     else:
         text = None
     # Sticker (Beispiel: https://t.me/telegram/23)
@@ -175,14 +188,22 @@ def tg_post_parse(b, save = True, describe = True):
     else:
         voice = None
     # Video URL (Beispiel: https://t.me/telegram/46)
+    # Wenn ein Thumbnail/Startbild verfügbar ist - das ist leider nur bei den
+    # Channel-Seiten, nicht bei den Einzel-Post-Seiten der Fall - speichere
+    # es ab wie ein Photo. 
     if b.select_one('video.tgme_widget_message_video') is not None:
         video_url = b.select_one('video.tgme_widget_message_video')['src']
         if b.select_one('tgme_widget_message_video_thumb') is not None:
-            video_thumbnail = re.search(r"(?<=image\:url\('\)).+(?=\')",b.select_one('tgme_widget_message_video_thumb')['style'].group(0))
+            video_thumbnail_url = re.search(r"(?<=image\:url\('\)).+(?=\')",b.select_one('tgme_widget_message_video_thumb')['style'].group(0))
             video = {'url': video_url,
-                    'thumbnail': video_thumbnail,
-                    'image': base64.b64encode(requests.get(video_thumbnail).content).decode('utf-8')
+                    'thumbnail': video_thumbnail_url,
             }
+            if save or describe:
+                # Thumbnail wird unter photo abgespeichert
+                photo = {'url': video_thumbnail_url,
+                         'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
+                }
+                photo['file'] = save_url(video_thumbnail_url, f"{channel}_{b_nr}_photo")
         else:
             video = {'url': video_url,
                      }
@@ -190,8 +211,8 @@ def tg_post_parse(b, save = True, describe = True):
             video['file'] = save_url(video_url, f"{channel}_{b_nr}_video")
         if describe:
             video['transcription'] = transcribe(video['file'])
-            if 'image' in video: 
-                video['description'] = f"data:image/jpeg;base64,{video['image']}"
+            if photo is not None: 
+                photo['description'] = gpt4_description(f"data:image/jpeg;base64, {photo['image']}")
     else:
         video = None
     # Document / Audio URL? https://t.me/telegram/35
@@ -208,13 +229,16 @@ def tg_post_parse(b, save = True, describe = True):
         }
     else: 
         forward = None
-
-
+    # Poll, Beispiel: https://t.me/wilhelmkachel/1079
+    poll_type = b.select_one("div.tgme_widget_message_poll_type")
+    if poll_type is not None:
+        poll_type = poll_type.get_text() # None wenn nicht vorhanden
     post_dict = {
         'channel': channel,
         'nr': b_nr,
         'url': post_url,
-        'views': views, #  Momentaufnahme!
+        'views': views, #  Momentaufnahme! Views zum Zeitpunkt views_ts
+        'views_ts': datetime.now().isoformat(), # Zeitstempel für die Views
         'timedate': timestamp,
         'text': text,
         'photo': photo,
@@ -222,12 +246,14 @@ def tg_post_parse(b, save = True, describe = True):
         'video': video,
         'voice': voice,
         'forwards': forward,
+        'poll': poll_type, 
         'links': links,
         'hashtags': [f"#{tag}" for tag in hashtags],
     }
     return post_dict
 
 def tgc_read(cname, nr, save=True, describe = False):
+    # Einzelnen Post lesen: URL erzeugen, aufrufen. 
     c = tgc_clean(cname)
     channel_url = f"https://t.me/{c}/{nr}"
     return tgc_read_url(channel_url)
@@ -276,8 +302,10 @@ def tgc_blockread(cname="telegram", nr=None, save=True, describe=False):
     tgm = BeautifulSoup(response.content, 'html.parser')
 
     block = tgm.select("div.tgme_widget_message_wrap") 
-    block_list = [tg_post_parse(b, save, describe) for b in block]
-    return block_list
+    posts = [tg_post_parse(b, save, describe) for b in block]
+    # Posts aufsteigend sortieren   
+    posts.sort(key=lambda x: x['nr'])
+    return posts
 
 def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
     # Liest einen Bereich von Posts 
@@ -296,5 +324,88 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
         # Abbruchbedingungen: Letzten Post des Channels erreicht, oder Ende des zu lesenden Bereichs
         loop = (max_nr == last_nr) or (last_nr > n2)
         posts.extend(new_posts)  
-      
+    # Posts aufsteigend sortieren   
+    posts.sort(key=lambda x: x['nr'])      
     return posts
+
+def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
+    # Liest eine Anzahl n von Posts, beginnend bei Post cutoff (wenn cutoff=None, dann den aktuellsten)
+    # Zuerst: Nummer des letzten Posts holen
+    profile = tgc_profile(cname)
+    # Sicherheitscheck: erste Post-Nummer überhaupt schon gepostet?
+    max_nr = profile['n_posts']
+    if cutoff is None: 
+        cutoff = max_nr
+    elif cutoff > max_nr: 
+        return None
+    posts = []
+    while len(posts) < n: 
+        # Blockread-Routine liest immer ein ganzes Stück der Seite
+        new_posts = tgc_blockread(cname, cutoff, save, describe)
+        nr_values = [post['nr'] for post in new_posts]
+        posts.extend(new_posts)  
+        # Abbruchbedingung: erster Post erreicht
+        if cutoff == 1: 
+            break
+        cutoff = cutoff - 16
+        if cutoff < 1:
+            cutoff = 1
+    # Posts aufsteigend sortieren   
+    posts.sort(key=lambda x: x['nr'])
+    return posts
+
+## Routinen zum Check der letzten 20(...) Posts eines Telegram-Channels
+# analog zu check_handle in der check_bsky-Library
+#
+# Hinter den Kulissen werden Listen von Post-dicts genutzt
+
+# Routine checkt eine Post-Liste, wie sie aus den tgc_read... Routinen kommen.
+# Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
+# Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
+def check_tg_list(posts, check_images = True): 
+    for post in posts:
+        if 'detectora_ai_score' not in post:
+            # Noch keine KI-Einschätzung für den Text?
+            post['detectora_ai_score'] = detectora_wrapper(post['text'])
+    # Leerzeile für den Fortschrittsbalken
+    print()
+    if not check_images:
+        return
+    # Okay, es geht weiter: Bilder auf KI prüfen
+    for post in posts:
+        if 'aiornot_ai_score' not in post: 
+            if post['photo'] is not None:
+                # Bild analysieren
+                # Das hier ist für die Galerie: AIORNOT kann derzeit
+                # keine base64-Strings checken. 
+                # Das Problem an den URLs der Photos ist: sie sind nicht garantiert. 
+                base64_image = post['photo'].get('image',None) 
+                image = f"data:image/jpeg;base64, {base64_image}"
+            post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('url'))
+    return posts
+# Wrapper für die check_tg_list Routine. 
+# Gibt Resultate als df zurück, arbeitet aber hinter den Kulissen mit 
+# einer Liste von dicts (anders als check_bsky)
+
+def check_tgc(cname, n=20, cursor = None, check_images = True):
+     
+    exit("Funktion noch nicht definiert")
+    return None
+
+def retrieve_tg_csv(cname, path= "tg-checks"):
+    fname = path + "/" + cname + ".csv"
+    if os.path.exists(fname):
+        df = pd.read_csv(fname)
+        # reformat the columns containing dicts
+        
+        return df
+    else:
+        return None
+    
+def append_tg_csv(cname, posts_list, path = "tg-checks"):
+    existing_df = retrieve_tg_csv(cname, path)
+    df = pd.DataFrame(posts_list)
+    if existing_df is not None: 
+        df = pd.concat([existing_df, df]).drop_duplicates(subset=['uri']).reset_index(drop=True)
+    df.to_csv(path + "/" + cname + ".csv", index=False)
+
