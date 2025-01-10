@@ -2,6 +2,10 @@ from src.aichecker.check_tg import *
 from src.aichecker.detectora import query_detectora
 from src.aichecker.aiornot import query_aiornot
 
+# KONSTANTEN
+N = 20
+DETECTORA_T = 0.8 # 80%
+AIORNOT_T = 0.9 # 90%   
 TEST = False
 
 # Hilfsfunktion: CSV einlesen und als df ausgeben
@@ -81,14 +85,12 @@ if __name__ == "__main__":
         existing_df = reimport_csv(filename)
         max_nr = max(existing_df['nr'])
         print(f"Dieser Kanal wurde schon einmal ausgelesen, zuletzt Post Nr.: {max_nr} - seitdem {last_post-max_nr} neue Posts")
-    # Lies die 20 aktuellsten Posts, sichere und analysiere sie
+    else: 
+        max_nr = last_post-N
+    # Lies die aktuellsten Posts, sichere und analysiere sie
     #
-    # KONSTANTEN
-    N = 10
-    DETECTORA_T = 0.8 # 80%
-    AIORNOT_T = 0.9 # 90%
     print("Einlesen/mit KI beschreiben: ", end="")
-    posts = tgc_read_number(handle_str, N)
+    posts = tgc_read_range(handle_str, max_nr+1, last_post)
     print() # für die Fortschrittsmeldung
     print("Auf KI-Inhalt prüfen: ",end="")
     checked_posts = check_tg_list(posts, check_images = True)
