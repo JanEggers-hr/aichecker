@@ -66,18 +66,46 @@ def ai_description(image):
     # Return ai-generated description
     return desc2
 
-def transcribe(audio):
+def transcribe(fname):
     # Wrapper; ruft eine der drei Whisper-Transcribe-Varianten auf. 
     # Favorit: das beschleunigte whisper-s2t
     # (das aber erst CTranslate2 mit METAL-Unterstützung braucht auf dem Mac
     # bzw. CUDA auf Windows-Rechnern)
+    #
+    # Als erstes: Das in Telegram übliche .ogg-Audioformat konvertieren
+    if ".ogg" in fname.lower():
+        fname = convert_ogg_to_m4a(fname)
     try: 
-        text = transcribe_whisper(audio)
+        text = transcribe_whisper(fname)
+        #text = transcribe_api(fname)
         # return transcribe_jax(audio)
         # return transcribe_ws2t(audio)
         return text
     except:
         return ""
+
+from pydub import AudioSegment
+
+def convert_ogg_to_m4a(input_file):
+    # Load the OGG file
+    try:
+        audio = AudioSegment.from_ogg(input_file)
+        # Export the audio to an M4A file
+        output_file = Path(input_file).with_suffix('.m4a')
+        audio.export(output_file, format="m4a")
+    except:
+        return None
+
+
+def transcribe_api(fname):
+    client = OpenAI()
+    audio_file= open(fname, "rb")
+    transcription = client.audio.transcriptions.create(
+        model="whisper-1", 
+        file=audio_file
+    )
+    return (transcription.text)
+
 
 def transcribe_whisper(fname, model="large-v3-turbo"):
     # Vanilla Whisper. Womöglich nicht die schnellste Lösung. 

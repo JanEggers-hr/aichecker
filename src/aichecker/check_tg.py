@@ -54,6 +54,9 @@ def tgc_profile(channel="telegram"):
     except requests.exceptions.RequestException:
         print(f"Warning: Channel {c} not found")
         return None
+    # Kein Channel? Channel haben immer wenigstens einen Namen in der Infokarte
+    if tgm.select_one("div.tgme_channel_info") is None:
+        return None
     if tgm.select_one("div.tgme_channel_info_description") is not None:
         description = tgm.select_one("div.tgme_channel_info_description").get_text()
     else:
@@ -63,12 +66,18 @@ def tgc_profile(channel="telegram"):
     for info_counter in tgm.find_all('div', class_='tgme_channel_info_counter'):
         counter_value = info_counter.find('span', class_='counter_value').text.strip()
         counter_type = info_counter.find('span', class_='counter_type').text.strip()
+        # Sonderbedingungen: nur 1 Link, nur 1 Foto, nur 1 Video? Umbenennen für Konsistenz
+        if counter_type in ['photo', 'video', 'link', 'subscriber']:
+            counter_type += "s"
         channel_info[counter_type] = extract_k(counter_value)
 
     # The last post is visible on this page. Gather its number and date.
-    last_post_href = tgm.select('a.tgme_widget_message_date')[-1]['href']
-    channel_info['n_posts'] = int(re.search(r'[0-9]+$', last_post_href).group())
-
+    # Wenn das Konto noch nicht gepostet hat: Abbruch. 
+    if tgm.select_one("div.tgme_widget_message") is None:
+        channel_info['n_posts'] = 0
+    else: 
+        last_post_href = tgm.select('a.tgme_widget_message_date')[-1]['href']
+        channel_info['n_posts'] = int(re.search(r'[0-9]+$', last_post_href).group())
     return channel_info
 
 
@@ -140,7 +149,7 @@ def tg_post_parse(b, save = True, describe = True):
     hashtags = [a['href'][3:] for a in textlinks if a['href'].startswith("?q=")]
     ### Die möglichen Content-Abschnitte eines Posts ###
     # Text
-    if b.select_one("div.tgme_widget_message_text_wrap") is not None:
+    if b.select_one("div.tgme_widget_message_text") is not None:
         text = b.select_one("div.tgme_widget_message_text").get_text()
     # Polls: Text der Optionen extrahieren
     elif b.select_one("div.tgme_widget_message_poll") is not None:
@@ -374,14 +383,17 @@ def check_tg_list(posts, check_images = True):
     # Okay, es geht weiter: Bilder auf KI prüfen
     for post in posts:
         if 'aiornot_ai_score' not in post: 
-            if post['photo'] is not None:
+            if post['video'] is not None:
+                # Audio des Videos analysieren
+                post['aiornot_ai_score'] = aiornot_wrapper(post['video'].get('file'), is_image = False)
+            elif post['photo'] is not None:
                 # Bild analysieren
                 # Das hier ist für die Galerie: AIORNOT kann derzeit
                 # keine base64-Strings checken. 
                 # Das Problem an den URLs der Photos ist: sie sind nicht garantiert. 
                 base64_image = post['photo'].get('image',None) 
                 image = f"data:image/jpeg;base64, {base64_image}"
-            post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('url'))
+                post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('url'))
     return posts
 # Wrapper für die check_tg_list Routine. 
 # Gibt Resultate als df zurück, arbeitet aber hinter den Kulissen mit 
