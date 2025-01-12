@@ -67,7 +67,7 @@ def bsky_aiornot_wrapper(did,embed):
             link = image['image']['ref']['$link']
             i_url = f"https://cdn.bsky.app/img/feed_thumbnail/plain/{did}/{link}"
             aiornot_report = aiornot_wrapper(i_url)
-            aiornot_report['gpt4_description'] = gpt4_description(image)
+            aiornot_report['gpt4_description'] = gpt4_description(i_url)
             desc.append(aiornot_report)
         return desc
     else:
