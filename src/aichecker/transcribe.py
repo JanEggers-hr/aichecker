@@ -66,7 +66,7 @@ def ai_description(image):
     # Return ai-generated description
     return desc2
 
-def transcribe(fname):
+def transcribe(fname, use_api = False):
     # Wrapper; ruft eine der drei Whisper-Transcribe-Varianten auf. 
     # Favorit: das beschleunigte whisper-s2t
     # (das aber erst CTranslate2 mit METAL-Unterstützung braucht auf dem Mac
@@ -76,8 +76,10 @@ def transcribe(fname):
     if ".ogg" in fname.lower():
         fname = convert_ogg_to_m4a(fname)
     try: 
-        text = transcribe_whisper(fname)
-        #text = transcribe_api(fname)
+        if use_api:
+            text = transcribe_api(fname)
+        else: 
+            text = transcribe_whisper(fname)
         # return transcribe_jax(audio)
         # return transcribe_ws2t(audio)
         return text

@@ -108,7 +108,7 @@ def tgc_clean(cname):
 def save_url(fname, name, mdir="./media"):
     # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
     # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
-    content_ext = re.search("\.[a-zA-Z0-9]+(?=\?|$)",fname).group(0)
+    content_ext = re.search(r"\.[a-zA-Z0-9]+(?=\?|$)",fname).group(0)
     content_file = f"{mdir}/{name}{content_ext}"
     try:
         os.makedirs(os.path.dirname(content_file), exist_ok=True)
@@ -186,8 +186,12 @@ def tg_post_parse(b, save = True, describe = True):
     # Sprachnachricht tgme_widget_message_voice https://t.me/fragunsdochDasOriginal/27176
     if b.select_one('audio.tgme_widget_message_voice') is not None:
         # Link auf OGG-Datei
-        voice_url = b.select_one('audio.tgme_widget_message_voice')[url]
+        voice_url = b.select_one('audio.tgme_widget_message_voice')['src']
         voice_duration = b.select_one('time.tgme_widget_message_voice_duration').get_text()
+        voice = {
+            'url': voice_url,
+            'duration': voice_duration,
+        }
         # Für Transkription immer lokale Kopie anlegen
         if save or describe: 
             voice['file'] = save_url(voice_url, f"{channel}_{b_nr}_voice")
@@ -321,7 +325,7 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
     # Zuerst: Nummer des letzten Posts holen
     profile = tgc_profile(cname)
     # Sicherheitscheck: erste Post-Nummer überhaupt schon gepostet?
-    max_nr = profile['n_post']
+    max_nr = profile['n_posts']
     if n1 > max_nr: 
         return None
     loop = True
@@ -388,12 +392,7 @@ def check_tg_list(posts, check_images = True):
                 post['aiornot_ai_score'] = aiornot_wrapper(post['video'].get('file'), is_image = False)
             elif post['photo'] is not None:
                 # Bild analysieren
-                # Das hier ist für die Galerie: AIORNOT kann derzeit
-                # keine base64-Strings checken. 
-                # Das Problem an den URLs der Photos ist: sie sind nicht garantiert. 
-                base64_image = post['photo'].get('image',None) 
-                image = f"data:image/jpeg;base64, {base64_image}"
-                post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('url'))
+                post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('file'), is_image = True)
     return posts
 # Wrapper für die check_tg_list Routine. 
 # Gibt Resultate als df zurück, arbeitet aber hinter den Kulissen mit 

@@ -1,6 +1,13 @@
 from .detectora import query_detectora
-from .aiornot import query_aiornot
+# from .aiornot import query_aiornot
 from .transcribe import gpt4_description
+
+# Alternative zu meinen selbst geschriebenen aiornot-Routinen: 
+# https://github.com/aiornotinc/aiornot-python
+# Installieren mit
+#    pip install aiornot
+
+from aiornot import Client
 
 # Konstante 
 d_thresh = .8 # 80 Prozent 
@@ -20,20 +27,25 @@ def detectora_wrapper(text: str):
     return score
 
 def aiornot_wrapper(content, is_image = True):
+    aiornot_client = Client()
     # Verpackung. Fortschrittsbalken.
     if content is None:
         print(" ", end="")
         return
     # Fortschrittsbalken
     print("?", end="")
-    report = query_aiornot(content, is_image)
+    is_url = (content.startswith("http://") or content.startswith("https://"))
+    if is_image:
+        response = aiornot_client.image_report_by_url(content) if is_url else aiornot_client.image_report_by_file(content)
+    else: 
+        response = aiornot_client.audio_report_by_url(content) if is_url else aiornot_client.audio_report_by_file(content)        
     # Beschreibung: https://docs.aiornot.com/#5b3de85d-d3eb-4ad1-a191-54988f56d978   
-    if report is not None:  
+    if response is not None:  
         aiornot_dict = ({
-            'aiornot_score': report['verdict'],
+            'aiornot_score': response.report.verdict,
             # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
-            'aiornot_confidence': report['ai']['confidence'] if 'ai' in report else report['confidence'],
-            'aiornot_generator': report['generator'] if 'generator' in report else 'Audio',
+            'aiornot_confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else response.report.confidence,
+            'aiornot_generator': response.report.generator if hasattr(response.report, 'generator') else None,
         })
         print(f"\b{'X' if aiornot_dict['aiornot_score'] != 'human' else '.'}",end="")
         return aiornot_dict
@@ -50,9 +62,9 @@ def bsky_aiornot_wrapper(did,embed):
     if 'images' in embed:
         images = embed['images']
         desc = []
-        for i in images:
+        for image in images:
             # Construct an URL for the image thumbnail (normalised size)
-            link = i['image']['ref']['$link']
+            link = image['image']['ref']['$link']
             i_url = f"https://cdn.bsky.app/img/feed_thumbnail/plain/{did}/{link}"
             aiornot_report = aiornot_wrapper(i_url)
             aiornot_report['gpt4_description'] = gpt4_description(image)

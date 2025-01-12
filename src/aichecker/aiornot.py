@@ -62,7 +62,7 @@ def query_aiornot(content, is_image = False):
             return None
     # Dateiname? Dann mit Multipart-Header 
     if not (content.startswith("http://") or content.startswith("https://")):
-        fname = 
+        fname = content
         headers = {
             'Authorization': f"Bearer {api_key}",
             'Accept': 'application/json',

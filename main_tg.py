@@ -63,15 +63,13 @@ if __name__ == "__main__":
         if 'aiornot_ai_score' not in post: 
             if post['video'] is not None:
                 # Audio des Videos analysieren
-                post['aiornot_ai_score'] = aiornot_wrapper(post['video'].get('url'), is_image = False)
+                post['aiornot_ai_score'] = aiornot_wrapper(post['video'].get('file'), is_image = False)
                 print("Video: AIORNOT-Score")
                 # Bild analysieren
                 # Das hier ist für die Galerie: AIORNOT kann derzeit
                 # keine base64-Strings checken. 
-                # Das Problem an den URLs der Photos ist: sie sind nicht garantiert. 
-                base64_image = post['photo'].get('image',None) 
-                image = f"data:image/jpeg;base64, {base64_image}"
-            post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('url'))
+            elif post['photo'] is not None: 
+                post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('file'))
             print("AIORNOT-AI-Score: {post['aiornot_ai_score']}")
             # Videos kann man nur über das Audio auf KI checken. 
             # Muss ich erst noch implementieren. 
