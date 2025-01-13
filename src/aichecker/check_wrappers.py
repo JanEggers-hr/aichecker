@@ -13,6 +13,21 @@ from aiornot import Client
 d_thresh = .8 # 80 Prozent 
 limit = 25 # Posts für den Check
 
+def object_to_dict(obj):
+    """Recursively converts an object to a dictionary."""
+    if isinstance(obj, dict):
+        # Recursively handle dictionaries
+        return {k: object_to_dict(v) for k, v in obj.items()}
+    elif hasattr(obj, "__dict__"):
+        # Handle objects with __dict__
+        return {k: object_to_dict(v) for k, v in vars(obj).items()}
+    elif isinstance(obj, (list, tuple, set)):
+        # Handle iterables
+        return type(obj)(object_to_dict(v) for v in obj)
+    else:
+        # Return the object if it cannot be converted
+        return obj
+
 def detectora_wrapper(text: str):
     # Verpackung. Fügt nur den "Fortschrittsbalken" hinzu. 
     print("?", end="")
@@ -57,7 +72,7 @@ def aiornot_wrapper(content, is_image = True):
             # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
             # Audios SOLLTEN eien Confidence-Wert in response.report.confidence haben, haben es aber nicht
             'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else .99,
-            'generator': response.report.generator if hasattr(response.report, 'generator') else None,
+            'generator': object_to_dict(response.report.generator) if hasattr(response.report, 'generator') else None,
         })
         print(f"\b{'X' if aiornot_dict['score'] != 'human' else '.'}",end="")
         return aiornot_dict

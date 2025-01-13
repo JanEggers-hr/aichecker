@@ -193,7 +193,8 @@ def tg_post_parse(b, save = True, describe = True):
                     }
         if describe:
             # GPT4o-mini versteht JPG, PNG, nicht animiertes GIF... und WEBP.
-            sticker['description'] = gpt4_description(sticker_url)
+            image = base64.b64encode(requests.get(sticker_url).content).decode('utf-8')
+            photo['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
         if save:
             sticker['file'] = save_url(sticker_url, f"{channel}_{b_nr}_sticker")
     else:
@@ -205,7 +206,8 @@ def tg_post_parse(b, save = True, describe = True):
                     # 'image': base64.b64encode(requests.get(photo_url).content).decode('utf-8')
                     }
         if describe:
-            photo['description'] = gpt4_description(f"data:image/jpeg;base64,{photo['image']}")
+            image = base64.b64encode(requests.get(photo_url).content).decode('utf-8')
+            photo['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
         if save:
             photo['file'] = save_url(photo_url, f"{channel}_{b_nr}_photo")
     else:
@@ -254,7 +256,8 @@ def tg_post_parse(b, save = True, describe = True):
         if describe:
             video['transcription'] = transcribe(video['file'])
             if photo is not None: 
-                photo['description'] = gpt4_description(f"data:image/jpeg;base64, {photo['image']}")
+                image = base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
+                photo['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
     else:
         video = None
     # Document / Audio URL? https://t.me/telegram/35
