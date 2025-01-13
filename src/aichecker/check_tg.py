@@ -294,13 +294,13 @@ def tg_post_parse(b, save = True, describe = True):
     }
     return post_dict
 
-def tgc_read(cname, nr, save=True, describe = False):
+def tgc_read(cname, nr, save=True, describe = True):
     # Einzelnen Post lesen: URL erzeugen, aufrufen. 
     c = tgc_clean(cname)
     channel_url = f"https://t.me/{c}/{nr}"
-    return tgc_read_url(channel_url)
+    return tgc_read_url(channel_url, save, describe)
 
-def tgc_read_url(channel_url, save=True, describe = False):
+def tgc_read_url(channel_url, save=True, describe = True):
     # Reads a single post from its URL
     # Supposes that the URL is well-formed. 
     channel_url += "?embed=1&mode=tme"
