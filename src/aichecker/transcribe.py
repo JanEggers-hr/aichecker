@@ -67,7 +67,7 @@ def ai_description(image):
     # Return ai-generated description
     return desc2
 
-def transcribe(fname, use_api = False):
+def transcribe(fname, use_api = True):
     # Wrapper; ruft eine der drei Whisper-Transcribe-Varianten auf. 
     # Favorit: das beschleunigte whisper-s2t
     # (das aber erst CTranslate2 mit METAL-Unterstützung braucht auf dem Mac

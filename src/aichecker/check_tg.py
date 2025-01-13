@@ -366,9 +366,16 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
         n2 = max_nr
     posts = []
     while n <= n2:
-        new_post = tgc_read(cname, n, save, describe)
-        n = n + 1
-        posts.append(new_post)  
+        max = n
+        new_posts = tgc_blockread(cname, n, save, describe)
+        for p in new_posts:
+            if p['nr'] > n2: 
+                return posts
+            if p['nr'] >= n:
+                posts.append(p)
+                if p['nr'] > max:
+                    max = p['nr']
+        n = max
     return posts
 
 def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):

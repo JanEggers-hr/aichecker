@@ -5,7 +5,7 @@ from src.aichecker.transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
 from ast import literal_eval
 
 # KONSTANTEN
-N = 20
+N = 10
 DETECTORA_T = 0.8 # 80%
 AIORNOT_T = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.    
 TEST = False
