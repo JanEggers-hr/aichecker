@@ -402,6 +402,7 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
 # Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
 # Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
 def check_tg_list(posts, check_images = True): 
+    posts = [p for p in posts if p is not None]
     for post in posts:
         if 'detectora_ai_score' not in post:
             # Noch keine KI-Einschätzung für den Text?
