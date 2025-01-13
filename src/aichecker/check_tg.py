@@ -358,6 +358,8 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
     if n1 > max_nr: 
         return None
     n = n1
+    if n2 is None:
+        n2 = max_nr
     posts = []
     while n <= n2:
         new_post = tgc_read(cname, n, save, describe)
