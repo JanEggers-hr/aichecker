@@ -35,7 +35,7 @@ def tgc_profile(channel="telegram"):
     dict with the keys 
     - 'channel'
     - 'description'
-    - 'image' (base64 des Profilbilds) und 'image_url' (URL des Profilbilds)
+    # - 'image' (base64 des Profilbilds) und 'image_url' (URL des Profilbilds)
     - 'subscribers' (Number)
     - 'photos' (number)
     - 'videos' (number)
@@ -189,7 +189,7 @@ def tg_post_parse(b, save = True, describe = True):
     if b.select_one("div.tgme_widget_message_sticker_wrap") is not None:
         sticker_url = b.select_one("i.tgme_widget_message_sticker")['data-webp']
         sticker = {'url': sticker_url,
-                    'image': base64.b64encode(requests.get(sticker_url).content).decode('utf-8')
+                    # 'image': base64.b64encode(requests.get(sticker_url).content).decode('utf-8')
                     }
         if describe:
             # GPT4o-mini versteht JPG, PNG, nicht animiertes GIF... und WEBP.
@@ -202,7 +202,7 @@ def tg_post_parse(b, save = True, describe = True):
     if b.select_one("a.tgme_widget_message_photo_wrap") is not None:
         photo_url = re.search(r"(?<=image\:url\(\').+(?=\')", b.select_one("a.tgme_widget_message_photo_wrap")['style']).group(0)
         photo = {'url': photo_url,
-                    'image': base64.b64encode(requests.get(photo_url).content).decode('utf-8')
+                    # 'image': base64.b64encode(requests.get(photo_url).content).decode('utf-8')
                     }
         if describe:
             photo['description'] = gpt4_description(f"data:image/jpeg;base64,{photo['image']}")
@@ -240,7 +240,8 @@ def tg_post_parse(b, save = True, describe = True):
             }
             photo = {
                 'url': video_thumbnail_url,
-                'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
+                # Keine Bas64 aus Übersichtlichkeits-Gründen
+                #'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
             }
             if save or describe:
                 # Thumbnail wird unter photo abgespeichert
