@@ -47,7 +47,7 @@ if __name__ == "__main__":
     image_posts = [post for post in df['aiornot_ai_score'].to_list() if post is not None]
     # Liste auspacken, nur die Dicts ohne None-Elemente
     image_list = [item for sublist in image_posts for item in sublist]
-    ai_list = [item for item in image_list if item['aiornot_score']!='human']
+    ai_list = [item for item in image_list if item['score']!='human']
     if len(image_list) == 0: 
         p_ai = 0
     else: 

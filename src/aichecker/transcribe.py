@@ -8,6 +8,7 @@ from openai import OpenAI
 from pathlib import Path
 import os
 import whisper
+from pydub import AudioSegment  # für die OGG-zu-MP4-Konversion
 
 prompt = """Du bist Barrierefreiheits-Assistent.
 Du erstellst eine deutsche Bildbeschreibung für den Alt-Text.
@@ -74,7 +75,7 @@ def transcribe(fname, use_api = False):
     #
     # Als erstes: Das in Telegram übliche .ogg-Audioformat konvertieren
     if ".ogg" in fname.lower():
-        fname = convert_ogg_to_m4a(fname)
+        fname = convert_ogg_to_mp3(fname)
     try: 
         if use_api:
             text = transcribe_api(fname)
@@ -86,18 +87,39 @@ def transcribe(fname, use_api = False):
     except:
         return ""
 
-from pydub import AudioSegment
 
 def convert_ogg_to_m4a(input_file):
     # Load the OGG file
     try:
         audio = AudioSegment.from_ogg(input_file)
         # Export the audio to an M4A file
-        output_file = Path(input_file).with_suffix('.m4a')
-        audio.export(output_file, format="m4a")
+        output_file = os.path.splitext("./media/fragunsdochDasOriginal_27176_voice.ogg")[0]+".m4a"
+        audio.export(output_file, format="mp4")
+        return output_file
     except:
         return None
 
+def convert_ogg_to_mp3(input_file):
+    # Load the OGG file
+    try:
+        audio = AudioSegment.from_ogg(input_file)
+        # Export the audio to an M4A file
+        output_file = os.path.splitext(input_file)[0]+".mp3"
+        audio.export(output_file, format="mp3")
+        return output_file
+    except:
+        return None
+    
+def convert_mp4_to_mp3(input_file):
+    # Load the video file
+    try:
+        audio = AudioSegment.from_file(input_file, format="mp4")
+        # Export the audio to an MP3 file
+        output_file = os.path.splitext(input_file)[0]+".mp3"
+        audio.export(output_file, format="mp3")
+        return output_file
+    except:
+        return None
 
 def transcribe_api(fname):
     client = OpenAI()

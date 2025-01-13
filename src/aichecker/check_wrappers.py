@@ -36,18 +36,30 @@ def aiornot_wrapper(content, is_image = True):
     print("?", end="")
     is_url = (content.startswith("http://") or content.startswith("https://"))
     if is_image:
-        response = aiornot_client.image_report_by_url(content) if is_url else aiornot_client.image_report_by_file(content)
+        try:
+            response = aiornot_client.image_report_by_url(content) if is_url else aiornot_client.image_report_by_file(content)
+        except Exception as e: 
+            print(f"AIORNOT-Image-API-Fehler: {e}")
+            return None
     else: 
-        response = aiornot_client.audio_report_by_url(content) if is_url else aiornot_client.audio_report_by_file(content)        
+        # Achtung: DERZEIT (13.1.25) verarbeitet die Audio-API nur MP3-Dateien, keine MP4/M4A.
+        # Und Ogg schon gleich zweimal nicht. 
+        # Sie gibt auch noch keinen Confidence-Wert zurück, anders als dokumentiert.
+        try:
+            response = aiornot_client.audio_report_by_url(content) if is_url else aiornot_client.audio_report_by_file(content)        
+        except Exception as e:
+            print(f"AIORNOT-Audio-API-Fehler: {e}")
+            return None           
     # Beschreibung: https://docs.aiornot.com/#5b3de85d-d3eb-4ad1-a191-54988f56d978   
     if response is not None:  
         aiornot_dict = ({
-            'aiornot_score': response.report.verdict,
+            'score': response.report.verdict,
             # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
-            'aiornot_confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else response.report.confidence,
-            'aiornot_generator': response.report.generator if hasattr(response.report, 'generator') else None,
+            # Audios SOLLTEN eien Confidence-Wert in response.report.confidence haben, haben es aber nicht
+            'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else .99,
+            'generator': response.report.generator if hasattr(response.report, 'generator') else None,
         })
-        print(f"\b{'X' if aiornot_dict['aiornot_score'] != 'human' else '.'}",end="")
+        print(f"\b{'X' if aiornot_dict['score'] != 'human' else '.'}",end="")
         return aiornot_dict
     else:
         print("\b,")

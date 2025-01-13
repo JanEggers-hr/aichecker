@@ -13,7 +13,7 @@ from datetime import datetime
 import os
 import re
 import base64
-from .transcribe import gpt4_description, transcribe
+from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
 from .check_wrappers import detectora_wrapper, aiornot_wrapper
 
 def extract_k(n_str: str):
@@ -35,11 +35,13 @@ def tgc_profile(channel="telegram"):
     dict with the keys 
     - 'channel'
     - 'description'
-    - 'subscribers', (Number)
+    - 'image' (base64 des Profilbilds) und 'image_url' (URL des Profilbilds)
+    - 'subscribers' (Number)
     - 'photos' (number)
     - 'videos' (number)
     - 'links' (number)
     - 'n_posts' (number of the last published post)
+    - 'created' (wann angelegt)
 
     Example: 
     profile = tgc_profile("wilhelmkachel")
@@ -61,8 +63,18 @@ def tgc_profile(channel="telegram"):
         description = tgm.select_one("div.tgme_channel_info_description").get_text()
     else:
         description = None
+    img = tgm.select_one("i.tgme_page_photo_image") 
+    if img is not None:
+        image_url = img.select_one("img")['src']
+        image = base64.b64encode(requests.get(image_url).content).decode('utf-8')
+    else: 
+        image_url = None
+        image = None
     channel_info = {'name': c,
-                    'description': description}
+                    'description': description,
+                    'image_url': image_url,
+                    'image': image,
+                    }
     for info_counter in tgm.find_all('div', class_='tgme_channel_info_counter'):
         counter_value = info_counter.find('span', class_='counter_value').text.strip()
         counter_type = info_counter.find('span', class_='counter_type').text.strip()
@@ -78,6 +90,21 @@ def tgc_profile(channel="telegram"):
     else: 
         last_post_href = tgm.select('a.tgme_widget_message_date')[-1]['href']
         channel_info['n_posts'] = int(re.search(r'[0-9]+$', last_post_href).group())
+    # Get founding date of account. 
+    # Dafür die seite t.me/<cname>/1 aufrufen und nach tgme_widget_message_service_date suchen
+    c_url = f"https://t.me/s/{c}/1"
+    try:
+        response = requests.get(c_url)
+        response.raise_for_status()
+        tgm = BeautifulSoup(response.content, 'html.parser')
+    except requests.exceptions.RequestException:
+        print(f"Warning: Channel {c} not found")
+        return None
+    # Leider scheint tgme_widget_message_service_date erst nachgeladen zu werden; 
+    # alternativ: nimm das Datum des frühesten Posts
+    if tgm.select_one("time.time") is not None:
+        timestamp = datetime.fromisoformat(tgm.select_one("time.time")['datetime']).isoformat()
+        channel_info['created'] = timestamp
     return channel_info
 
 
@@ -131,9 +158,9 @@ def tg_post_parse(b, save = True, describe = True):
     # Postnummer, Zeitstempel (auch wenn er in Einzel-Posts als datetime auftaucht und in Channel_seiten als time)
     b_nr = int(re.search(r'[0-9]+$', b.select_one("a.tgme_widget_message_date")['href']).group())
     if b.select_one("time.time") is not None:
-        timestamp = datetime.fromisoformat(b.select_one("time.time")['datetime'])
+        timestamp = datetime.fromisoformat(b.select_one("time.time")['datetime']).isoformat()
     else: # Einzel-Post
-        timestamp = datetime.fromisoformat(b.select_one("time.datetime")['datetime'])
+        timestamp = datetime.fromisoformat(b.select_one("time.datetime")['datetime']).isoformat()
     # 
     if b.select_one("span.tgme_widget_message_views") is not None:
         views = extract_k(b.select_one("span.tgme_widget_message_views").get_text())
@@ -211,11 +238,12 @@ def tg_post_parse(b, save = True, describe = True):
             video = {'url': video_url,
                     'thumbnail': video_thumbnail_url,
             }
+            photo = {
+                'url': video_thumbnail_url,
+                'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
+            }
             if save or describe:
                 # Thumbnail wird unter photo abgespeichert
-                photo = {'url': video_thumbnail_url,
-                         'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
-                }
                 photo['file'] = save_url(video_thumbnail_url, f"{channel}_{b_nr}_photo")
         else:
             video = {'url': video_url,
@@ -279,6 +307,7 @@ def tgc_read_url(channel_url, save=True, describe = False):
     response.raise_for_status()
     tgm = BeautifulSoup(response.content, 'html.parser')
     # Error message?
+    print("'",end="")
     if tgm.select_one("div.tgme_widget_message_error") is not None: 
         print(f"Fehler beim Lesen von {channel_url}")
         return None
@@ -328,17 +357,12 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
     max_nr = profile['n_posts']
     if n1 > max_nr: 
         return None
-    loop = True
+    n = n1
     posts = []
-    while loop:
-        new_posts = tgc_blockread(cname, n1, save, describe)
-        nr_values = [post['nr'] for post in new_posts]
-        last_nr = max(nr_values)
-        # Abbruchbedingungen: Letzten Post des Channels erreicht, oder Ende des zu lesenden Bereichs
-        loop = (max_nr == last_nr) or (last_nr > n2)
-        posts.extend(new_posts)  
-    # Posts aufsteigend sortieren   
-    posts.sort(key=lambda x: x['nr'])      
+    while n <= n2:
+        new_post = tgc_read(cname, n, save, describe)
+        n = n + 1
+        posts.append(new_post)  
     return posts
 
 def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
@@ -389,10 +413,14 @@ def check_tg_list(posts, check_images = True):
         if 'aiornot_ai_score' not in post: 
             if post['video'] is not None:
                 # Audio des Videos analysieren
-                post['aiornot_ai_score'] = aiornot_wrapper(post['video'].get('file'), is_image = False)
+                fname = post['video'].get('file')
+                post['aiornot_ai_score'] = aiornot_wrapper(convert_mp4_to_mp3(fname), is_image = False)
             elif post['photo'] is not None:
                 # Bild analysieren
                 post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('file'), is_image = True)
+            elif post['voice'] is not None:
+                fname = post['voice'].get('file')
+                post['aiornot_ai_score'] = aiornot_wrapper(convert_ogg_to_mp3(fname), is_image = False)
     return posts
 # Wrapper für die check_tg_list Routine. 
 # Gibt Resultate als df zurück, arbeitet aber hinter den Kulissen mit 
