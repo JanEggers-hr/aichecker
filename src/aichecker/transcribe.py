@@ -8,6 +8,7 @@ from openai import OpenAI
 from pathlib import Path
 import os
 import whisper
+import logging
 from pydub import AudioSegment  # für die OGG-zu-MP4-Konversion
 
 prompt = """Du bist Barrierefreiheits-Assistent.
@@ -93,10 +94,11 @@ def convert_ogg_to_m4a(input_file):
     try:
         audio = AudioSegment.from_ogg(input_file)
         # Export the audio to an M4A file
-        output_file = os.path.splitext("./media/fragunsdochDasOriginal_27176_voice.ogg")[0]+".m4a"
+        output_file = os.path.splitext(input_file)[0]+".m4a"
         audio.export(output_file, format="mp4")
         return output_file
     except:
+        logging.error(f"Konnte Datei {input_file} nicht von OGG nach M4A wandeln")
         return None
 
 def convert_ogg_to_mp3(input_file):
@@ -108,6 +110,7 @@ def convert_ogg_to_mp3(input_file):
         audio.export(output_file, format="mp3")
         return output_file
     except:
+        logging.error(f"Konnte Datei {input_file} nicht von OGG nach MP3 wandeln")
         return None
     
 def convert_mp4_to_mp3(input_file):
@@ -119,6 +122,7 @@ def convert_mp4_to_mp3(input_file):
         audio.export(output_file, format="mp3")
         return output_file
     except:
+        logging.error(f"Konnte Datei {input_file} nicht von MP4 nach MP3 wandeln")
         return None
 
 def transcribe_api(fname):

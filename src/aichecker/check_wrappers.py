@@ -1,6 +1,7 @@
 from .detectora import query_detectora
 # from .aiornot import query_aiornot
 from .transcribe import gpt4_description
+import logging
 
 # Alternative zu meinen selbst geschriebenen aiornot-Routinen: 
 # https://github.com/aiornotinc/aiornot-python
@@ -54,7 +55,7 @@ def aiornot_wrapper(content, is_image = True):
         try:
             response = aiornot_client.image_report_by_url(content) if is_url else aiornot_client.image_report_by_file(content)
         except Exception as e: 
-            print(f"AIORNOT-Image-API-Fehler: {e}")
+            logging.error(f"AIORNOT-Image-API-Fehler: {e}")
             return None
     else: 
         # Achtung: DERZEIT (13.1.25) verarbeitet die Audio-API nur MP3-Dateien, keine MP4/M4A.
@@ -63,7 +64,7 @@ def aiornot_wrapper(content, is_image = True):
         try:
             response = aiornot_client.audio_report_by_url(content) if is_url else aiornot_client.audio_report_by_file(content)        
         except Exception as e:
-            print(f"AIORNOT-Audio-API-Fehler: {e}")
+            logging.error(f"AIORNOT-Audio-API-Fehler: {e}")
             return None           
     # Beschreibung: https://docs.aiornot.com/#5b3de85d-d3eb-4ad1-a191-54988f56d978   
     if response is not None:  

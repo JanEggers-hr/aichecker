@@ -10,9 +10,11 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+from dateutil.parser import isoparse
 import os
 import re
 import base64
+import logging
 from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
 from .check_wrappers import detectora_wrapper, aiornot_wrapper
 
@@ -49,12 +51,13 @@ def tgc_profile(channel="telegram"):
     """
     c = tgc_clean(channel)
     c_url = f"https://t.me/s/{c}"
+    logging.info(f"Lese Info aus Channel {c}")
     try:
         response = requests.get(c_url)
         response.raise_for_status()
         tgm = BeautifulSoup(response.content, 'html.parser')
     except requests.exceptions.RequestException:
-        print(f"Warning: Channel {c} not found")
+        logging.warning(f"Warning: Channel {c} not found")
         return None
     # Kein Channel? Channel haben immer wenigstens einen Namen in der Infokarte
     if tgm.select_one("div.tgme_channel_info") is None:
@@ -98,12 +101,12 @@ def tgc_profile(channel="telegram"):
         response.raise_for_status()
         tgm = BeautifulSoup(response.content, 'html.parser')
     except requests.exceptions.RequestException:
-        print(f"Warning: Channel {c} not found")
+        logging.warning(f"Warning: Channel {c} not found")
         return None
     # Leider scheint tgme_widget_message_service_date erst nachgeladen zu werden; 
     # alternativ: nimm das Datum des frühesten Posts
     if tgm.select_one("time.time") is not None:
-        timestamp = datetime.fromisoformat(tgm.select_one("time.time")['datetime']).isoformat()
+        timestamp = isoparse(tgm.select_one("time.time")['datetime']).isoformat()
         channel_info['created'] = timestamp
     return channel_info
 
@@ -140,14 +143,14 @@ def save_url(fname, name, mdir="./media"):
     try:
         os.makedirs(os.path.dirname(content_file), exist_ok=True)
     except:
-        print(f"Kann kein Media-Directory in {mdir} öffnen")
+        logging.error(f"Kann kein Media-Directory in {mdir} öffnen")
         return None
     try:
         with open(content_file, 'wb') as f:
             f.write(requests.get(fname).content)
         return content_file
     except:
-        print(f"Kann Datei {content_file} nicht schreiben")
+        logging.error(f"Kann Datei {content_file} nicht schreiben")
         return None
     
 def get_channel_from_url(channel:str):
@@ -157,10 +160,11 @@ def tg_post_parse(b, save = True, describe = True):
     # Immer vorhanden: 
     # Postnummer, Zeitstempel (auch wenn er in Einzel-Posts als datetime auftaucht und in Channel_seiten als time)
     b_nr = int(re.search(r'[0-9]+$', b.select_one("a.tgme_widget_message_date")['href']).group())
+    logging.info(f"Parse Telegram-Post Nr. {b_nr}")
     if b.select_one("time.time") is not None:
-        timestamp = datetime.fromisoformat(b.select_one("time.time")['datetime']).isoformat()
+        timestamp = isoparse(b.select_one("time.time")['datetime']).isoformat()
     else: # Einzel-Post
-        timestamp = datetime.fromisoformat(b.select_one("time.datetime")['datetime']).isoformat()
+        timestamp = isoparse(b.select_one("time.datetime")['datetime']).isoformat()
     # 
     if b.select_one("span.tgme_widget_message_views") is not None:
         views = extract_k(b.select_one("span.tgme_widget_message_views").get_text())
@@ -311,9 +315,10 @@ def tgc_read_url(channel_url, save=True, describe = True):
     response.raise_for_status()
     tgm = BeautifulSoup(response.content, 'html.parser')
     # Error message?
+    logging.info(f"Lese Einzelpost: {channel_url}")
     print("'",end="")
     if tgm.select_one("div.tgme_widget_message_error") is not None: 
-        print(f"Fehler beim Lesen von {channel_url}")
+        logging.error(f"Fehler beim Lesen von {channel_url}")
         return None
     b = tgm.select_one("div.tgme_widget_message")
     return tg_post_parse(b, save, describe)
@@ -343,6 +348,7 @@ def tgc_blockread(cname="telegram", nr=None, save=True, describe=False):
     # Nur einen Post holen? Dann t.me/<channel>/<nr>,
     # sonst t.me/s/<channel>/<nr>
     channel_url = f"https://t.me/s/{c}/{nr}"
+    logging.info(f"Lese Telegram-Channel {c}, Block um den Post {nr}")
     response = requests.get(channel_url)
     response.raise_for_status()
     tgm = BeautifulSoup(response.content, 'html.parser')
@@ -440,10 +446,19 @@ def check_tg_list(posts, check_images = True):
 # Gibt Resultate als df zurück, arbeitet aber hinter den Kulissen mit 
 # einer Liste von dicts (anders als check_bsky)
 
-def check_tgc(cname, n=20, cursor = None, check_images = True):
-     
-    exit("Funktion noch nicht definiert")
-    return None
+def tg_hydrate(posts): 
+    # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
+    # erstellt Beschreibungen und Transkriptionen. 
+    # 
+    # Fernziel: Asynchrone Verarbeitung. 
+    return posts
+
+def tg_evaluate(posts, check_texts = True, check_images = True):
+    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
+    # und AIORNOT. 
+    for post in posts: 
+        
+    return posts
 
 def retrieve_tg_csv(cname, path= "tg-checks"):
     fname = path + "/" + cname + ".csv"

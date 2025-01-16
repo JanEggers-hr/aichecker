@@ -22,6 +22,7 @@ Detectora-Key muss als DETECTORA_API_KEY in .env hinterlegt sein.
 import requests
 import json
 import os
+import logging
 
 # os.environ.get('OPENAI_API_KEY')
 
@@ -31,12 +32,13 @@ api_url = "https://backendkidetektor-apim.azure-api.net/watson"
 def query_detectora(text):
     if text == '':
         return None
+    logging.info(f"Checke Text mit Detectora: {text[:20]}...")
     data = {
         'query': text,
     }
     api_key = os.environ.get('DETECTORA_API_KEY')
     if api_key is None or api_key == "":
-        print("DETECTORA_API_KEY ist nicht gesetzt")
+        logging.error("DETECTORA_API_KEY ist nicht gesetzt")
         return None
     headers = {
         'APIKey': api_key,
@@ -51,12 +53,12 @@ def query_detectora(text):
             # Success
             return response.json()['fake_probability']
         elif response.status_code == 400:
-            print(f"DETECTORA: Fehlerhafte API-Anfrage: \'{data['query']}\'")
+            logging.error(f"DETECTORA: Fehlerhafte API-Anfrage: \'{data['query']}\'")
             return None
         elif response.status_code == 401:
-            print(f"DETECTORA_API_KEY {api_key} nicht gültig")
+            logging.error(f"DETECTORA_API_KEY {api_key} nicht gültig")
             return None
     except Exception as e:
-        print("Fehler beim Verbinden mit der DETECTORA-API:", str(e))
+        logging.error("Fehler beim Verbinden mit der DETECTORA-API:", str(e))
         return None
     
