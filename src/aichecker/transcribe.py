@@ -19,7 +19,7 @@ Du erstellst eine deutsche Bildbeschreibung für den Alt-Text.
 Beschreibe, was auf dem Bild zu sehen ist. 
 Beginne sofort mit der Beschreibung. Sei präzise und knapp. 
 Wenn das Bild lesbaren Text enthält, zitiere diesen Text."""
-client = OpenAI(api_key = os.environ.get('OPENAI_API_KEY'))
+
 # Use GPT-4 mini to describe images
 OLLAMA = False
 
@@ -27,6 +27,7 @@ def gpt4_description(image_url):
     # Check a local image by converting it to b64: 
     # image_url = f"data:image/jpeg;base64, {b64_image}"
     print(".", end="")
+    client = OpenAI(api_key = os.environ.get('OPENAI_API_KEY'))
     response = client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[

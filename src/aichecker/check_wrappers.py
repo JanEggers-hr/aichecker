@@ -8,7 +8,7 @@ import logging
 # Installieren mit
 #    pip install aiornot
 
-from aiornot import Client
+from aiornot import Client, AsyncClient
 
 # Konstante 
 d_thresh = .8 # 80 Prozent 
@@ -81,6 +81,41 @@ def aiornot_wrapper(content, is_image = True):
         print("\b,")
         return None
 
+async def async_aiornot_wrapper(content, is_image = True):
+    # Create a client (reads AIORNOT_API_KEY env)
+    async_client = AsyncClient()
+    # Check if the API is up
+    if not await async_client.is_live():
+        logging.error("AIORNOT API nicht erreichbar")
+        exit(1)
+    # Check your token
+    resp = await async_client.check_token()
+    if not resp.is_valid:
+        logging.error("AIORNOT-API-Token nicht gültig")
+        exit(1)
+    is_url = (content.startswith("http://") or content.startswith("https://"))
+    if is_image:
+        if is_url:
+            response = await async_client.image_report_by_url(content)
+        else:
+            response = await async_client.image_report_by_file(content)
+    else: # (Audio)
+        if is_url: 
+            response = await async_client.audio_report_by_url(content)
+        else:
+            response = await async_client.audio_report_by_file(content)
+    if response is None: 
+        return response
+    else:
+        aiornot_dict = ({
+            'score': response.report.verdict,
+            # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
+            # Audios SOLLTEN eien Confidence-Wert in response.report.confidence haben, haben es aber nicht
+            'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else .99,
+            'generator': object_to_dict(response.report.generator) if hasattr(response.report, 'generator') else None,
+        })
+        print(f"\b{'X' if aiornot_dict['score'] != 'human' else '.'}",end="")
+        return aiornot_dict
         
 def bsky_aiornot_wrapper(did,embed):
     # Verpackung für die AIORNOT-Funktion: 

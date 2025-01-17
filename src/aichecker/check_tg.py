@@ -360,7 +360,7 @@ def tgc_blockread(cname="telegram", nr=None, save=True, describe=False):
     return posts
 
 def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
-    # Liest einen Bereich von Posts 
+    # Liest einen Bereich von Post n1 bis Post n2 
     # Zuerst: Nummer des letzten Posts holen
     profile = tgc_profile(cname)
     # Sicherheitscheck: erste Post-Nummer überhaupt schon gepostet?
@@ -372,15 +372,15 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
         n2 = max_nr
     posts = []
     while n <= n2:
-        max = n
+        max = n2
         new_posts = tgc_blockread(cname, n, save, describe)
         for p in new_posts:
             if p['nr'] > n2: 
                 return posts
             if p['nr'] >= n:
                 posts.append(p)
-                if p['nr'] > max:
-                    max = p['nr']
+                if p['nr'] == n2:
+                    return posts
         n = max
     return posts
 
@@ -418,19 +418,15 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
 # Routine checkt eine Post-Liste, wie sie aus den tgc_read... Routinen kommen.
 # Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
 # Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
-def check_tg_list(posts, check_images = True): 
-    posts = [p for p in posts if p is not None]
-    for post in posts:
-        if 'detectora_ai_score' not in post:
-            # Noch keine KI-Einschätzung für den Text?
+
+def tg_evaluate(posts, check_texts = True, check_images = True):
+    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
+    # und AIORNOT. 
+    for post in posts: 
+        if ('detectora_ai_score' not in post) and check_texts:
+        # Noch keine KI-Einschätzung für den Text?
             post['detectora_ai_score'] = detectora_wrapper(post['text'])
-    # Leerzeile für den Fortschrittsbalken
-    print()
-    if not check_images:
-        return
-    # Okay, es geht weiter: Bilder auf KI prüfen
-    for post in posts:
-        if 'aiornot_ai_score' not in post: 
+        if ('aiornot_ai_score' not in post) and check_images: 
             if post['video'] is not None:
                 # Audio des Videos analysieren
                 fname = post['video'].get('file')
@@ -442,22 +438,35 @@ def check_tg_list(posts, check_images = True):
                 fname = post['voice'].get('file')
                 post['aiornot_ai_score'] = aiornot_wrapper(convert_ogg_to_mp3(fname), is_image = False)
     return posts
-# Wrapper für die check_tg_list Routine. 
-# Gibt Resultate als df zurück, arbeitet aber hinter den Kulissen mit 
-# einer Liste von dicts (anders als check_bsky)
 
 def tg_hydrate(posts): 
     # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
     # erstellt Beschreibungen und Transkriptionen. 
     # 
     # Fernziel: Asynchrone Verarbeitung. 
-    return posts
-
-def tg_evaluate(posts, check_texts = True, check_images = True):
-    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
-    # und AIORNOT. 
-    for post in posts: 
-        
+    for post in posts:
+        channel = post['channel']
+        b_nr = post['nr']
+        # Transcribe video and describe thumbnail 
+        if post['video'] is not None and post['video'].get('file', None) is None:
+            # Save video to file
+            video_url = post['video'].get('url')
+            vfile = save_url(video_url, f"{channel}_{b_nr}_video")
+            post['video']['file'] = vfile
+            # Now transcribe video file
+            post['video']['transcription'] = transcribe(vfile)
+        # Fun fact: video also saves a thumbnail for good measure
+        if post['photo'] is not None and post['photo'].get('file', None) is None:
+            photo_url = post['photo']['url']
+            pfile = save_url(photo_url, f"{channel}_{b_nr}_photo")
+            post['photo']['file'] = pfile
+            image = base64.b64encode(requests.get(photo_url).content).decode('utf-8')
+            post['photo']['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
+        if post['voice'] is not None and post['voice'].get('file', None) is None:
+            voice_url = post['voice']['url']
+            vfile = save_url(voice_url, f"{channel}_{b_nr}_voice")
+            post['voice']['file'] = vfile
+            post['voice']['transcription'] = gpt4_description(vfile) 
     return posts
 
 def retrieve_tg_csv(cname, path= "tg-checks"):
