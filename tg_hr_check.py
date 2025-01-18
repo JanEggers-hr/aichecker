@@ -61,6 +61,7 @@ if __name__ == "__main__":
         channels=['fragunsdochdasoriginal','freiheitffm']
     hr_links = []
     for c in channels: 
+        existing_df = pd.DataFrame()
         profile = tgc_profile(c)
         if profile is None:
                 print(f"Kein Konto mit dem Namen {c} gefunden.")
@@ -84,21 +85,22 @@ if __name__ == "__main__":
                 start_post = max(existing_df['nr'])
                 print(f"Dieser Kanal wurde schon einmal ausgelesen, zuletzt Post Nr.: {start_post} - seitdem {last_post-start_post} neue Posts")
             else: 
-                start_post = last_post-N+1
+                start_post = last_post-N
                 print(f"Noch nicht gespeichert. Importiere {N} Posts bis zum letzten: {last_post}.")        
             # Lies die aktuellsten Posts, sichere und analysiere sie
             #
-            print("Einlesen {start_post} bis {last_post}...")
-            posts = tgc_read_range(c, start_post, last_post, save=False, describe= False)
-            # Nach hr-Links suchen
-            for post in posts:
-                interessant = find_hr_links(post['text'])
-                if post['links']:
-                    interessant.extend(post['links'])
-            hr_links.extend(interessant)
-            print(f"Potenziell interessant: {interessant}")
-            # Posts anhängen an das csv dieses Kanals
-            df = pd.DataFrame(posts)
-            if ('existing_df' in globals()):
+            if start_post < last_post:
+                print(f"Einlesen {start_post+1} bis {last_post}...")
+                posts = tgc_read_range(c, start_post+1, last_post, save=False, describe= False)
+                # Nach hr-Links suchen
+                for post in posts:
+                    interessant = find_hr_links(post['text'])
+                    if post['links']:
+                        interessant.extend(post['links'])
+                hr_links.extend(interessant)
+                print(f"Potenziell interessant: {interessant}")
+                # Posts anhängen an das csv dieses Kanals
+                df = pd.DataFrame(posts)
                 df = pd.concat([existing_df, df]).drop_duplicates(subset=['nr']).reset_index(drop=True)
-            df.to_csv(f'tg-checks/{c}.csv', index=False)  # Save to CSV for example
+                df.to_csv(f'tg-checks/{c}.csv', index=False)  # Save to CSV for example
+    print("Ende Gelände.")

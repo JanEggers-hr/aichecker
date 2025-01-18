@@ -381,7 +381,7 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
                 posts.append(p)
                 if p['nr'] == n2:
                     return posts
-        n = max
+        n = p['nr']
     return posts
 
 def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
