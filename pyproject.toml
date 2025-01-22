@@ -17,6 +17,9 @@ dependencies = [
     "requests", # Alle bsky-Calls über Requests
     "openai", # für die Bildbeschreibung
     "ollama", # für die Bildbeschreibung
+    "openai-whisper", # für die Transkription
+    "bs4", # Seitenanalyse
+    "pydub", # Transkription/Audioformate
 ]
 readme="README.md"
 license = {file = "LICENSE"}
