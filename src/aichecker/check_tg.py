@@ -498,8 +498,8 @@ async def tg_hydrate_async(posts, mdir="./media"):
                 index += 1
     return posts
 
-def tg_hydrate(posts):
-    return asyncio.run(tg_hydrate_async(posts))
+def tg_hydrate(posts, mdir="./media"):
+    return asyncio.run(tg_hydrate_async(posts, mdir))
 
 async def tg_evaluate_async(posts, check_texts = True, check_images = True):
     tasks = []
