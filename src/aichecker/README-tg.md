@@ -115,8 +115,9 @@ die Tonspur eines Videos/eine Voice-Message in mp3 wandeln, mit KI-Checker prüf
 zu lange, um brauchbar zu sein, deshalb ist der Prozess in zwei Schritte aufgeteilt, die sich
 (einigermaßen) parallelisieren lassen: 
 
-tg_hydrate(posts) -> [dict]
+tg_hydrate(posts, mdir = "./media") -> [dict]
 * **posts**: Eine Liste von dicts (Format siehe oben: tgc_read...)
+* **mdir**: Das Verzeichnis für Mediendateien - auf dem Server funktioniert "./media" allerdings nicht; da am besten den kompletten Pfad angeben 
 
 Liest die Mediendateien von Fotos, Stickern, Videos und Voice-Nachrichten in den ```/media```-Ordner
 im Arbeitsverzeichnis. Anfragen werden asynchron gestellt, also parallelisiert; dadurch geht's recht flott. 

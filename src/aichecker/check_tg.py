@@ -144,7 +144,7 @@ def tgc_clean(cname):
 
 ## Abspeichern in Dateien
 
-def save_url(fname, name):
+def save_url(fname, name, mdir):
     # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
     # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
 #    mdir = os.path.dirname(os.path.abspath(__file__)) + '/../media'
@@ -164,11 +164,10 @@ def save_url(fname, name):
         logging.error(f"Kann Datei {content_file} nicht schreiben")
         return None
     
-async def save_url_async(session, fname, name):
+async def save_url_async(session, fname, name, mdir):
     # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
     # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
     # mdir = os.path.dirname(os.path.abspath(__file__)) + '/../media'
-    mdir = "./media"
     content_ext = re.search(r"\.[a-zA-Z0-9]+(?=\?|$)", fname).group(0)
     content_file = f"{mdir}/{name}{content_ext}"
     try:
@@ -458,7 +457,7 @@ async def detectora_async(text):
         result = await loop.run_in_executor(pool, detectora_wrapper, text)
     return result
 
-async def tg_hydrate_async(posts):
+async def tg_hydrate_async(posts, mdir="./media"):
     # Liest die Files der Videos, Fotos, Voice-Messages asynchron ein. 
     async with aiohttp.ClientSession() as session:
         tasks = []
@@ -469,20 +468,20 @@ async def tg_hydrate_async(posts):
             if post['video'] is not None and post['video'].get('file', None) is None:
                 video_url = post['video'].get('url')
                 vfile = f"{channel}_{b_nr}_video"
-                tasks.append(save_url_async(session, video_url, vfile))
+                tasks.append(save_url_async(session, video_url, vfile, mdir))
             if post['photo'] is not None and post['photo'].get('file', None) is None:
                 photo_url = post['photo']['url']
                 pfile = f"{channel}_{b_nr}_photo"
-                tasks.append(save_url_async(session, photo_url, pfile))
+                tasks.append(save_url_async(session, photo_url, pfile, mdir))
             if post['voice'] is not None and post['voice'].get('file', None) is None:
                 voice_url = post['voice']['url']
                 vfile = f"{channel}_{b_nr}_voice"
-                tasks.append(save_url_async(session, voice_url, vfile))
+                tasks.append(save_url_async(session, voice_url, vfile, mdir))
             if post['sticker'] is not None and post['sticker'].get('file',None) is None:
                 sticker_url = post['sticker']['url']
                 sfile = f"{channel}_{b_nr}_sticker"
                 # Sticker sind idR WEBP.
-                tasks.append(save_url_async(session, sticker_url, sfile))
+                tasks.append(save_url_async(session, sticker_url, sfile, mdir))
         results = await asyncio.gather(*tasks)
 
         # Assign results back to posts
@@ -576,7 +575,7 @@ async def tg_evaluate_async(posts, check_texts = True, check_images = True):
 def tg_evaluate(posts, check_texts = True, check_images = True):
     return asyncio.run(tg_evaluate_async(posts, check_texts= check_texts, check_images=check_images))
 
-def tg_hydrate_old(posts): 
+def tg_hydrate_old(posts, mdir="./media"): 
     # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
     # erstellt Beschreibungen und Transkriptionen. 
     # 
@@ -588,20 +587,20 @@ def tg_hydrate_old(posts):
         if post['video'] is not None and post['video'].get('file', None) is None:
             # Save video to file
             video_url = post['video'].get('url')
-            vfile = save_url(video_url, f"{channel}_{b_nr}_video")
+            vfile = save_url(video_url, f"{channel}_{b_nr}_video", mdir)
             post['video']['file'] = vfile
             # Now transcribe video file
             post['video']['transcription'] = transcribe(vfile)
         # Fun fact: video also saves a thumbnail for good measure
         if post['photo'] is not None and post['photo'].get('file', None) is None:
             photo_url = post['photo']['url']
-            pfile = save_url(photo_url, f"{channel}_{b_nr}_photo")
+            pfile = save_url(photo_url, f"{channel}_{b_nr}_photo", mdir)
             post['photo']['file'] = pfile
             image = base64.b64encode(requests.get(photo_url).content).decode('utf-8')
             post['photo']['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
         if post['voice'] is not None and post['voice'].get('file', None) is None:
             voice_url = post['voice']['url']
-            vfile = save_url(voice_url, f"{channel}_{b_nr}_voice")
+            vfile = save_url(voice_url, f"{channel}_{b_nr}_voice", mdir)
             post['voice']['file'] = vfile
             post['voice']['transcription'] = transcribe(vfile) 
     return posts

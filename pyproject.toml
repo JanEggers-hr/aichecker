@@ -10,7 +10,7 @@ authors = [
 maintainers = [
   {name = "Jan Eggers", email = "jan.eggers@hr.de"},
 ]
-version = "0.3.0" # Neue Versionsnummern für pip-Update
+version = "0.3.1" # Neue Versionsnummern für pip-Update
 description = "Bluesky- und Telegram-Konten auf KI-Inhalte checken"
 requires-python = ">=3.8"
 dependencies = [
