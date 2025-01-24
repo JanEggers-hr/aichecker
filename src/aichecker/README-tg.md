@@ -108,6 +108,36 @@ Liest die Posts von n1 bis n2
 ### tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True)
 Beginnt beim Post mit der Nummer ```cutoff``` und versucht dann ```n``` Posts zu lesen.
 
-## check_tg_list(posts, check_images = True) -> [dict]
+## Auswertungs-Funktionen: 
+
+Zunächst hatte ich alles seriell abgearbeitet: Posts einlesen, mit KI verschriftlichen, ggf.
+die Tonspur eines Videos/eine Voice-Message in mp3 wandeln, mit KI-Checker prüfen. Das dauerte
+zu lange, um brauchbar zu sein, deshalb ist der Prozess in zwei Schritte aufgeteilt, die sich
+(einigermaßen) parallelisieren lassen: 
+
+tg_hydrate(posts) -> [dict]
 * **posts**: Eine Liste von dicts (Format siehe oben: tgc_read...)
-* **check_images**: AIORNOT-Prüfung auf KI-Inhalte ja/nein?
+
+Liest die Mediendateien von Fotos, Stickern, Videos und Voice-Nachrichten in den ```/media```-Ordner
+im Arbeitsverzeichnis. Anfragen werden asynchron gestellt, also parallelisiert; dadurch geht's recht flott. 
+
+Gibt das posts-Dict mit den Dateinamen der heruntergeladenen Mediendateien zurück. 
+
+tg_evaluate(posts, check_texts=True, check_media=True) -> [dict]
+* **posts**: Eine Liste von hydrierten dicts (Format siehe oben: tgc_read...)
+* **check_media**: Bilder, Videos und Voice auf KI-Spuren checken
+
+Erledigt parallel alles mit KI: Beschreibung, KI-Check bei Text, Bild und Ton. 
+Da AIORNOT nur MP3-Dateien sauber verarbeiten kann, ist bei Videos/Voice-Nachrichten eine
+Wandlung aus MP4 bzw. OGG vorgeschaltet; das passiert mithilfe von ffmpeg - und nicht asynchron.
+Da Telegram-Dateien in der Regel klein sind, ist der Zeitaufwand aber zu verschmerzen. 
+
+Setzt ein hydriertes posts-Dict voraus (sonst passiert wenig); gibt den Posts die Keys 
+```detectora_ai_score``` (KI-Texterkennungs-Vertraunswert, ein Wert zwischen 0 und 1) und 
+```aiornot_ai_score``` zurück. 
+
+```aiornot_ai_score``` ist ein dict aus: 
+
+* score: 'ai' oder 'human'
+* confidence: Vertrauenswert der KI-Erkennung (leider nicht bei Video/Voice, deshalb gibt die Routine den unsinnigen Wert 1.01 zurück)
+* generator: ein dict, das für die bekannten KI-Bildgeneratoren jeweils einen Key enthält, in dem ein Dict mit dem 'confidence'-Wert für den einzelnen Generator gespeichert ist. Der Eintrag mit dem höchsten confidence-Wert war's wahrscheinlich (allerdings wird z.B. Flux als DALLE erkannt.)

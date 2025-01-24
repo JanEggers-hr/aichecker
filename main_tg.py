@@ -5,7 +5,7 @@ from src.aichecker.transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
 from ast import literal_eval
 
 # KONSTANTEN
-N = 10
+N = 25
 DETECTORA_T = 0.8 # 80%
 AIORNOT_T = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.    
 TEST = False
@@ -50,44 +50,6 @@ if __name__ == "__main__":
     print(f"Videos: {profile['videos']}")
     print(f"Links: {profile['links']}")
     print()
-    if TEST:
-        # Lies eine Seite (mit bis zu 16 Posts), ohne Mediendateien anzulegen
-        # und ohne Audios zu transkribieren
-        posts = tgc_blockread(profile['name'],nr=1, save=False, describe=False)
-        # Jetzt die aktuellsten Posts, mit Transkription/Mediendateien
-        #posts = tgc_read(channels_dict['name'],nr=None, save=True, transcribe=True)
-        #print(posts)
-        # Nur ein einzelner Post
-        posts = tgc_read(profile['name'],nr=last_post)
-        print(posts)
-        # Über die Post-URL
-        print(tgc_read_url('https://t.me/telegram/46',save=True, describe=True))
-        # Ein Bereich
-        posts = tgc_read_range(profile['name'], last_post - 19, last_post, save = True, describe= True)
-        # Ein einzelner Post mit Video, Vorschaubild und Text
-        posts = tgc_read_range("fragunsdochDasOriginal", 27170, 27170, True, True)
-        post = posts[0]
-        print("KI-Check:")
-        if 'detectora_ai_score' not in post:
-            # Noch keine KI-Einschätzung für den Text?
-            # post['detectora_ai_score'] = detectora_wrapper(post['text'])
-            print(f"Detectora-Score: {query_detectora(post['text'])}")
-        if 'aiornot_ai_score' not in post: 
-            if post['video'] is not None:
-                # Audio des Videos analysieren
-                video_file = post['video'].get('file')
-                post['aiornot_ai_score'] = aiornot_wrapper(convert_mp4_to_mp3(video_file), is_image = False)
-                print("Video: AIORNOT-Score")
-                # Bild analysieren
-                # Das hier ist für die Galerie: AIORNOT kann derzeit
-                # keine base64-Strings checken. 
-            elif post['photo'] is not None: 
-                post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('file'))
-            print("AIORNOT-AI-Score: {post['aiornot_ai_score']}")
-            # Videos kann man nur über das Audio auf KI checken. 
-            # Muss ich erst noch implementieren. 
-            # Die telegram-Videos haben kein Audio; deshalb ist das hier nicht schlimm
-        print("Ende TEST")
     # Schau, ob es schon Daten gibt
     if not os.path.exists('tg-checks'):
         os.makedirs('tg-checks')
@@ -102,12 +64,12 @@ if __name__ == "__main__":
     # Lies die aktuellsten Posts, sichere und analysiere sie
     #
     print("Einlesen: ", end="")
-    posts = tgc_read_range(handle_str, start_post, last_post, save=False, describe= False)
+    posts = tgc_read_range(handle_str, start_post, last_post)
     print() # für die Fortschrittsmeldung
-    print("Inhalte sichern und mit KI beschreiben: ", end="")
+    print("Inhalte sichern: ", end="")
     hydrated_posts = tg_hydrate(posts)
     print()
-    print("Auf KI-Inhalt prüfen: ",end="")
+    print("Beschreiben und auf KI-Inhalt prüfen: ",end="")
     # Bearbeitet nur die Posts, für die Inhalte hinterlegt sind
     checked_posts = tg_evaluate(hydrated_posts)
     #
@@ -144,4 +106,3 @@ if __name__ == "__main__":
     if ('existing_df' in globals()):
         df = pd.concat([existing_df, df]).drop_duplicates(subset=['nr']).reset_index(drop=True)
     df.to_csv(f'tg-checks/{handle}.csv', index=False)  # Save to CSV for example
-

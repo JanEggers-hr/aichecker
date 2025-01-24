@@ -2,6 +2,9 @@
 #
 # Mistral-Übersetzung aus R (mein altes Rtgchannels-Projekt V0.1.1)
 # Angepasst auf Listen statt Dataframes
+# In Maßen parallellisiert - Dateien werden asynchron gespeichert, 
+# API-Abfragen bei OPENAI, AIORNOT und Detectora asynchron gestellt (was eine GROSSE
+# Zeitersparnis bedeutet!)
 #
 # 1-2025 Jan Eggers
 
@@ -17,6 +20,10 @@ import base64
 import logging
 from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
 from .check_wrappers import detectora_wrapper, aiornot_wrapper
+import aiohttp
+import asyncio
+import aiofiles
+from concurrent.futures import ThreadPoolExecutor
 
 def extract_k(n_str: str):
     try: 
@@ -135,9 +142,13 @@ def tgc_clean(cname):
         
     return n
 
-def save_url(fname, name, mdir="./media"):
+## Abspeichern in Dateien
+
+def save_url(fname, name):
     # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
     # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
+#    mdir = os.path.dirname(os.path.abspath(__file__)) + '/../media'
+    mdir = "./media"
     content_ext = re.search(r"\.[a-zA-Z0-9]+(?=\?|$)",fname).group(0)
     content_file = f"{mdir}/{name}{content_ext}"
     try:
@@ -153,10 +164,33 @@ def save_url(fname, name, mdir="./media"):
         logging.error(f"Kann Datei {content_file} nicht schreiben")
         return None
     
+async def save_url_async(session, fname, name):
+    # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
+    # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
+    # mdir = os.path.dirname(os.path.abspath(__file__)) + '/../media'
+    mdir = "./media"
+    content_ext = re.search(r"\.[a-zA-Z0-9]+(?=\?|$)", fname).group(0)
+    content_file = f"{mdir}/{name}{content_ext}"
+    try:
+        os.makedirs(os.path.dirname(content_file), exist_ok=True)
+    except Exception as e:
+        logging.error(f"Kann kein Media-Directory in {mdir} öffnen: {e}")
+        return None
+    try:
+        async with session.get(fname) as response:
+            content = await response.read()
+            async with aiofiles.open(content_file, 'wb') as f:
+                await f.write(content)
+        return content_file
+    except Exception as e:
+        logging.error(f"Kann Datei {content_file} nicht schreiben: {e}")
+        return None
+
 def get_channel_from_url(channel:str):
     return re.search(r"(?<=t\.me\/).+(?=\/[0-9])",channel).group(0)
 
-def tg_post_parse(b, save = True, describe = True):
+def tg_post_parse(b):
+    # Liest aus dem HTML-Code eines einzelnen 
     # Immer vorhanden: 
     # Postnummer, Zeitstempel (auch wenn er in Einzel-Posts als datetime auftaucht und in Channel_seiten als time)
     b_nr = int(re.search(r'[0-9]+$', b.select_one("a.tgme_widget_message_date")['href']).group())
@@ -195,25 +229,15 @@ def tg_post_parse(b, save = True, describe = True):
         sticker = {'url': sticker_url,
                     # 'image': base64.b64encode(requests.get(sticker_url).content).decode('utf-8')
                     }
-        if describe:
-            # GPT4o-mini versteht JPG, PNG, nicht animiertes GIF... und WEBP.
-            image = base64.b64encode(requests.get(sticker_url).content).decode('utf-8')
-            photo['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
-        if save:
-            sticker['file'] = save_url(sticker_url, f"{channel}_{b_nr}_sticker")
     else:
         sticker = None
+
     # Photo URL
     if b.select_one("a.tgme_widget_message_photo_wrap") is not None:
         photo_url = re.search(r"(?<=image\:url\(\').+(?=\')", b.select_one("a.tgme_widget_message_photo_wrap")['style']).group(0)
         photo = {'url': photo_url,
                     # 'image': base64.b64encode(requests.get(photo_url).content).decode('utf-8')
                     }
-        if describe:
-            image = base64.b64encode(requests.get(photo_url).content).decode('utf-8')
-            photo['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
-        if save:
-            photo['file'] = save_url(photo_url, f"{channel}_{b_nr}_photo")
     else:
         photo = None
     # Sprachnachricht tgme_widget_message_voice https://t.me/fragunsdochDasOriginal/27176
@@ -226,10 +250,6 @@ def tg_post_parse(b, save = True, describe = True):
             'duration': voice_duration,
         }
         # Für Transkription immer lokale Kopie anlegen
-        if save or describe: 
-            voice['file'] = save_url(voice_url, f"{channel}_{b_nr}_voice")
-        if describe:
-            voice['transcription'] = transcribe(voice['file'])
         
     else:
         voice = None
@@ -249,19 +269,8 @@ def tg_post_parse(b, save = True, describe = True):
                 # Keine Bas64 aus Übersichtlichkeits-Gründen
                 #'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
             }
-            if save or describe:
-                # Thumbnail wird unter photo abgespeichert
-                photo['file'] = save_url(video_thumbnail_url, f"{channel}_{b_nr}_photo")
         else:
-            video = {'url': video_url,
-                     }
-        if save or describe:
-            video['file'] = save_url(video_url, f"{channel}_{b_nr}_video")
-        if describe:
-            video['transcription'] = transcribe(video['file'])
-            if photo is not None: 
-                image = base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
-                photo['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
+            video = {'url': video_url,                     }
     else:
         video = None
     # Document / Audio URL? https://t.me/telegram/35
@@ -301,13 +310,13 @@ def tg_post_parse(b, save = True, describe = True):
     }
     return post_dict
 
-def tgc_read(cname, nr, save=True, describe = True):
+def tgc_read(cname, nr):
     # Einzelnen Post lesen: URL erzeugen, aufrufen. 
     c = tgc_clean(cname)
     channel_url = f"https://t.me/{c}/{nr}"
-    return tgc_read_url(channel_url, save, describe)
+    return tgc_read_url(channel_url)
 
-def tgc_read_url(channel_url, save=True, describe = True):
+def tgc_read_url(channel_url):
     # Reads a single post from its URL
     # Supposes that the URL is well-formed. 
     channel_url += "?embed=1&mode=tme"
@@ -321,9 +330,9 @@ def tgc_read_url(channel_url, save=True, describe = True):
         logging.error(f"Fehler beim Lesen von {channel_url}")
         return None
     b = tgm.select_one("div.tgme_widget_message")
-    return tg_post_parse(b, save, describe)
+    return tg_post_parse(b)
 
-def tgc_blockread(cname="telegram", nr=None, save=True, describe=False):
+def tgc_blockread(cname="telegram", nr=None):
     """
     Reads a block of posts from the channel - normally 16 are displayed.
     If single parameter is set, read only the post nr; return empty if it 
@@ -354,12 +363,12 @@ def tgc_blockread(cname="telegram", nr=None, save=True, describe=False):
     tgm = BeautifulSoup(response.content, 'html.parser')
 
     block = tgm.select("div.tgme_widget_message_wrap") 
-    posts = [tg_post_parse(b, save, describe) for b in block]
+    posts = [tg_post_parse(b) for b in block]
     # Posts aufsteigend sortieren   
     posts.sort(key=lambda x: x['nr'])
     return posts
 
-def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
+def tgc_read_range(cname, n1=1, n2=None, save=False, describe = False):
     # Liest einen Bereich von Post n1 bis Post n2 
     # Zuerst: Nummer des letzten Posts holen
     profile = tgc_profile(cname)
@@ -373,7 +382,7 @@ def tgc_read_range(cname, n1=1, n2=None, save=True, describe = True):
     posts = []
     while n <= n2:
         max = n2
-        new_posts = tgc_blockread(cname, n, save, describe)
+        new_posts = tgc_blockread(cname, n)
         for p in new_posts:
             if p['nr'] > n2: 
                 return posts
@@ -397,7 +406,7 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
     posts = []
     while len(posts) < n: 
         # Blockread-Routine liest immer ein ganzes Stück der Seite
-        new_posts = tgc_blockread(cname, cutoff, save, describe)
+        new_posts = tgc_blockread(cname, cutoff)
         nr_values = [post['nr'] for post in new_posts]
         posts.extend(new_posts)  
         # Abbruchbedingung: erster Post erreicht
@@ -415,31 +424,159 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
 #
 # Hinter den Kulissen werden Listen von Post-dicts genutzt
 
-# Routine checkt eine Post-Liste, wie sie aus den tgc_read... Routinen kommen.
-# Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
-# Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
 
-def tg_evaluate(posts, check_texts = True, check_images = True):
-    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
-    # und AIORNOT. 
-    for post in posts: 
-        if ('detectora_ai_score' not in post) and check_texts:
-        # Noch keine KI-Einschätzung für den Text?
-            post['detectora_ai_score'] = detectora_wrapper(post['text'])
-        if ('aiornot_ai_score' not in post) and check_images: 
-            if post['video'] is not None:
-                # Audio des Videos analysieren
-                fname = post['video'].get('file')
-                post['aiornot_ai_score'] = aiornot_wrapper(convert_mp4_to_mp3(fname), is_image = False)
-            elif post['photo'] is not None:
-                # Bild analysieren
-                post['aiornot_ai_score'] = aiornot_wrapper(post['photo'].get('file'), is_image = True)
-            elif post['voice'] is not None:
-                fname = post['voice'].get('file')
-                post['aiornot_ai_score'] = aiornot_wrapper(convert_ogg_to_mp3(fname), is_image = False)
+# Erstes Experiment: Asynchrones Hydrieren
+
+# Wrapper für Describe und transcribe aus transcribe.py
+# Parallelisieren von eigentlich synchronen Routinen: Aufruf in ThreadPoolExecutor einklinken
+async def describe_async(image_data):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, gpt4_description, image_data)
+    return result
+
+async def transcribe_async(file):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, transcribe, file)
+    return result
+
+# Wrapper für AIORNOT-Check
+# Das ist im Augenblick ein wenig geschummelt; es gibt ja eine asynchrone AIORNOT-Routine. 
+# Die baue ich im nächsten Schritt ein. 
+async def aiornot_async(file, is_image=True):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, aiornot_wrapper, file, is_image)
+    return result
+
+# Wrapper für Detectora-Check
+# Auch hier könnte man unter der Oberfläche einen parallelisierbaren API-Aufruf bauen. 
+async def detectora_async(text):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, detectora_wrapper, text)
+    return result
+
+async def tg_hydrate_async(posts):
+    # Liest die Files der Videos, Fotos, Voice-Messages asynchron ein. 
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for post in posts:
+            channel = post['channel']
+            b_nr = post['nr']
+
+            if post['video'] is not None and post['video'].get('file', None) is None:
+                video_url = post['video'].get('url')
+                vfile = f"{channel}_{b_nr}_video"
+                tasks.append(save_url_async(session, video_url, vfile))
+            if post['photo'] is not None and post['photo'].get('file', None) is None:
+                photo_url = post['photo']['url']
+                pfile = f"{channel}_{b_nr}_photo"
+                tasks.append(save_url_async(session, photo_url, pfile))
+            if post['voice'] is not None and post['voice'].get('file', None) is None:
+                voice_url = post['voice']['url']
+                vfile = f"{channel}_{b_nr}_voice"
+                tasks.append(save_url_async(session, voice_url, vfile))
+            if post['sticker'] is not None and post['sticker'].get('file',None) is None:
+                sticker_url = post['sticker']['url']
+                sfile = f"{channel}_{b_nr}_sticker"
+                # Sticker sind idR WEBP.
+                tasks.append(save_url_async(session, sticker_url, sfile))
+        results = await asyncio.gather(*tasks)
+
+        # Assign results back to posts
+        index = 0
+        for post in posts:
+            if post['video'] is not None and post['video'].get('file', None) is None:
+                post['video']['file'] = results[index]
+                index += 1
+            if post['photo'] is not None and post['photo'].get('file', None) is None:
+                post['photo']['file'] = results[index]
+                index += 1
+            if post['voice'] is not None and post['voice'].get('file', None) is None:
+                post['voice']['file'] = results[index]
+                index += 1
     return posts
 
-def tg_hydrate(posts): 
+def tg_hydrate(posts):
+    return asyncio.run(tg_hydrate_async(posts))
+
+async def tg_evaluate_async(posts, check_texts = True, check_images = True):
+    tasks = []
+    for post in posts:
+        channel = post['channel']
+        b_nr = post['nr']
+        if check_images:
+            if post['video'] is not None and post['video'].get('file', None) is not None:
+                vfile = post['video'].get('file')
+                # Asynchron Transkription und KI-Bewertung anfordern
+                tasks.append(transcribe_async(vfile))
+                # Audiofile konvertieren und transkribieren transkribieren
+                tasks.append(aiornot_async(convert_mp4_to_mp3(vfile), is_image=False))
+
+            if post['photo'] is not None and post['photo'].get('file', None) is not None:
+                pfile = post['photo']['file']
+                # Bild aus Datei in ein Objekt laden
+                with open(pfile, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
+                tasks.append(aiornot_async(pfile, is_image = True))
+
+            if post['voice'] is not None and post['voice'].get('file', None) is not None:
+                ofile = post['voice']['file']
+                afile = convert_ogg_to_mp3(ofile)
+                tasks.append(describe_async(afile))
+                tasks.append(aiornot_async(afile, is_image = False))
+
+            if post['sticker'] is not None and post['sticker'].get('file') is not None:  
+                sfile = post['sticker']['file'] 
+                with open(sfile, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')          
+                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
+                tasks.append(aiornot_async(sfile, is_image = True))
+
+        if post['text'] is not None and check_texts:
+            tasks.append(detectora_async(post['text']))
+
+    results = await asyncio.gather(*tasks)
+
+        # Assign results back to posts
+        # Die results stehen in der Reihenfolge, in der die Tasks generiert wurden, 
+        # wir replizieren also im Prinzip die Schleife von oben. 
+    index = 0
+    for post in posts:
+        if check_images:
+            if post['video'] is not None and post['video'].get('file', None) is not None:
+                post['video']['transcription'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+            if post['photo'] is not None and post['photo'].get('file', None) is not None:
+                post['photo']['description'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+            if post['voice'] is not None and post['voice'].get('file', None) is not None:
+                post['voice']['transcription'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+            if post['sticker'] is not None and post['sticker'].get('file', None) is not None:
+                post['sticker']['description'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+        if post['text'] is not None and check_texts:
+            post['detectora_ai_score'] = results[index]
+            index +=1
+
+    return posts
+
+def tg_evaluate(posts, check_texts = True, check_images = True):
+    return asyncio.run(tg_evaluate_async(posts, check_texts= check_texts, check_images=check_images))
+
+def tg_hydrate_old(posts): 
     # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
     # erstellt Beschreibungen und Transkriptionen. 
     # 
@@ -466,23 +603,35 @@ def tg_hydrate(posts):
             voice_url = post['voice']['url']
             vfile = save_url(voice_url, f"{channel}_{b_nr}_voice")
             post['voice']['file'] = vfile
-            post['voice']['transcription'] = gpt4_description(vfile) 
+            post['voice']['transcription'] = transcribe(vfile) 
     return posts
 
-def retrieve_tg_csv(cname, path= "tg-checks"):
-    fname = path + "/" + cname + ".csv"
-    if os.path.exists(fname):
-        df = pd.read_csv(fname)
-        # reformat the columns containing dicts
-        
-        return df
-    else:
-        return None
-    
-def append_tg_csv(cname, posts_list, path = "tg-checks"):
-    existing_df = retrieve_tg_csv(cname, path)
-    df = pd.DataFrame(posts_list)
-    if existing_df is not None: 
-        df = pd.concat([existing_df, df]).drop_duplicates(subset=['uri']).reset_index(drop=True)
-    df.to_csv(path + "/" + cname + ".csv", index=False)
+# Routine checkt eine Post-Liste, wie sie aus den tgc_read... Routinen kommen.
+# Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
+# Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
 
+def tg_evaluate_old(posts, check_texts = True, check_images = True):
+    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
+    # und AIORNOT. 
+    for post in posts: 
+        if ('detectora_ai_score' not in post) and check_texts:
+        # Noch keine KI-Einschätzung für den Text?
+            post['detectora_ai_score'] = detectora_wrapper(post['text'])
+        if ('aiornot_ai_score' not in post) and check_images: 
+            if post['video'] is not None:
+                # Audio des Videos analysieren
+                fname = post['video'].get('file')
+                reply = aiornot_wrapper(convert_mp4_to_mp3(fname), is_image = False)
+                post['aiornot_ai_score'] = reply['score'] 
+                post['aiornot_ai_data'] = reply
+            elif post['photo'] is not None:
+                # Bild analysieren
+                reply = aiornot_wrapper(post['photo'].get('file'), is_image = True)
+                post['aiornot_ai_score'] = reply['score'] 
+                post['aiornot_ai_data'] = reply
+            elif post['voice'] is not None:
+                fname = post['voice'].get('file')
+                reply = aiornot_wrapper(convert_ogg_to_mp3(fname), is_image = False)
+                post['aiornot_ai_score'] = reply['score'] 
+                post['aiornot_ai_data'] = reply
+    return posts

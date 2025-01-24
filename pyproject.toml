@@ -10,7 +10,7 @@ authors = [
 maintainers = [
   {name = "Jan Eggers", email = "jan.eggers@hr.de"},
 ]
-version = "0.2.4.3" # Neue Versionsnummern für pip-Update
+version = "0.3.0" # Neue Versionsnummern für pip-Update
 description = "Bluesky- und Telegram-Konten auf KI-Inhalte checken"
 requires-python = ">=3.8"
 dependencies = [
@@ -20,6 +20,7 @@ dependencies = [
     "openai-whisper", # für die Transkription
     "bs4", # Seitenanalyse
     "pydub", # Transkription/Audioformate
+    "aiornot", # KI-Detektor 
 ]
 readme="README.md"
 license = {file = "LICENSE"}

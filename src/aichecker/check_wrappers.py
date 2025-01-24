@@ -72,7 +72,7 @@ def aiornot_wrapper(content, is_image = True):
             'score': response.report.verdict,
             # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
             # Audios SOLLTEN eien Confidence-Wert in response.report.confidence haben, haben es aber nicht
-            'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else .99,
+            'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else 1.01,
             'generator': object_to_dict(response.report.generator) if hasattr(response.report, 'generator') else None,
         })
         print(f"\b{'X' if aiornot_dict['score'] != 'human' else '.'}",end="")
@@ -81,6 +81,7 @@ def aiornot_wrapper(content, is_image = True):
         print("\b,")
         return None
 
+## ACHTUNG: CODE NOCH NICHT ANGEPASST UND GETESTET
 async def async_aiornot_wrapper(content, is_image = True):
     # Create a client (reads AIORNOT_API_KEY env)
     async_client = AsyncClient()
