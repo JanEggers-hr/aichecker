@@ -15,15 +15,10 @@ import re
 import base64
 import logging
 from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
-from .check_wrappers import detectora_wrapper, aiornot_wrapper
-
-def extract_k(n_str: str):
-    try: 
-        # Zahlen wie '5.06K', '1K', '1.2M'
-        n_f = float(re.sub(r'[KMB]$', lambda m: {'K': 'e+03', 'M': 'e+06', 'B': 'e+09'}[m.group()], n_str))
-        return int(n_f)
-    except:
-        return None
+from .check_wrappers import detectora_wrapper, aiornot_wrapper, transcribe_async, describe_async, detectora_async, aiornot_async
+from .save_urls import save_url_async, save_url
+import asyncio
+import aiohttp
 
 def igc_profile(username="mrbeast"):
     """
@@ -107,24 +102,6 @@ def igc_clean(cname):
     
     return None
 
-def save_url(fname, name, mdir="./media"):
-    # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
-    # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
-    content_ext = re.search(r"\.[a-zA-Z0-9]+(?=\?|$)",fname).group(0)
-    content_file = f"{mdir}/{name}{content_ext}"
-    try:
-        os.makedirs(os.path.dirname(content_file), exist_ok=True)
-    except:
-        logging.error(f"Kann kein Media-Directory in {mdir} öffnen")
-        return None
-    try:
-        with open(content_file, 'wb') as f:
-            f.write(requests.get(fname).content)
-        return content_file
-    except:
-        logging.error(f"Kann Datei {content_file} nicht schreiben")
-        return None
-
 def ig_post_parse(instagram_data, save=True, describe=True):
     posts = []
     for item in instagram_data['data']['items']:
@@ -205,6 +182,61 @@ def igc_read_posts(cname, n=12):
 
     return posts[:n]
 
+# Die Post-Dicts hydrieren, d.h.: die URLs dazu laden und abspeichern
+
+async def ig_hydrate_async(posts, mdir="./media"):
+    # Liest die Files der Videos, Fotos, Voice-Messages asynchron ein. 
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for post in posts:
+            if 'videos' in post: 
+                for idx, video_url in enumerate(post['videos']):
+                    save_url_async(session, video_url, f"{post['code']}_video_{idx}", mdir)
+            if 'images' in post:
+                for idx, image_url in enumerate(post['images']):   
+                    save_url_async(session, image_url, f"{post['code']}_image_{idx}", mdir)
+                    
+        results = await asyncio.gather(*tasks)
+        # Assign results back to posts
+        index = 0
+        for post in posts:
+            if 'videos' in post:
+                for idx, video_url in enumerate(post['videos']):
+                    vfile = results[index]
+                    post['videos'][idx] = {'url': video_url, 'file': vfile}
+                    index += 1
+            if 'images' in post:
+                for idx, image_url in enumerate(post['images']): 
+                    ifile = results[index]
+                    post['images'][idx] = {'url': image_url, 'file': ifile}
+                    image += 1
+    return posts
+
+def ig_hydrate(posts, mdir="./media"):
+    return asyncio.run(ig_hydrate_async(posts, mdir))
+
+
+def ig_hydrate_old(posts): 
+    # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
+    # erstellt Beschreibungen und Transkriptionen. 
+    # 
+    # Fernziel: Asynchrone Verarbeitung. 
+    for post in posts:
+        # Transkription des Videos und Beschreibung des Thumbnails
+        if 'videos' in post:
+            for idx, video_url in enumerate(post['videos']):
+                vfile = save_url(video_url, f"{post['code']}_video_{idx}")
+                post['videos'][idx] = {'url': video_url, 'file': vfile, 'transcription': transcribe(vfile)}
+        
+        if 'images' in post:
+            for idx, image_url in enumerate(post['images']):
+                pfile = save_url(image_url, f"{post['code']}_image_{idx}")
+                image = base64.b64encode(requests.get(image_url).content).decode('utf-8')
+                post['images'][idx] = {'url': image_url, 'file': pfile, 'description': gpt4_description(f"data:image/jpeg;base64, {image}")}
+    
+    return posts
+
+
 ## Routinen zum Check der letzten 20(...) Posts eines Telegram-Channels
 # analog zu check_handle in der check_bsky-Library
 #
@@ -214,7 +246,88 @@ def igc_read_posts(cname, n=12):
 # Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
 # Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
 
-def ig_evaluate(posts, check_texts=True, check_images=True):
+async def ig_evaluate_async(posts, check_texts = True, check_images = True):
+    tasks = []
+    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
+    # und AIORNOT. 
+    for post in posts:
+        if ('detectora_ai_score' not in post) and check_texts:
+            # Noch keine KI-Einschätzung für den Text?
+            post['detectora_ai_score'] = detectora_wrapper(post.get('caption', ''))
+
+    for post in posts:
+        if check_images:
+            if post['video'] is not None and post['video'].get('file', None) is not None:
+                vfile = post['video'].get('file')
+                # Asynchron Transkription und KI-Bewertung anfordern
+                tasks.append(transcribe_async(vfile))
+                # Audiofile konvertieren und transkribieren transkribieren
+                tasks.append(aiornot_async(convert_mp4_to_mp3(vfile), is_image=False))
+
+            if post['photo'] is not None and post['photo'].get('file', None) is not None:
+                pfile = post['photo']['file']
+                # Bild aus Datei in ein Objekt laden
+                with open(pfile, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
+                tasks.append(aiornot_async(pfile, is_image = True))
+
+            if post['voice'] is not None and post['voice'].get('file', None) is not None:
+                ofile = post['voice']['file']
+                afile = convert_ogg_to_mp3(ofile)
+                tasks.append(describe_async(afile))
+                tasks.append(aiornot_async(afile, is_image = False))
+
+            if post['sticker'] is not None and post['sticker'].get('file') is not None:  
+                sfile = post['sticker']['file'] 
+                with open(sfile, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')          
+                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
+                tasks.append(aiornot_async(sfile, is_image = True))
+
+        if post['text'] is not None and check_texts:
+            tasks.append(detectora_async(post['text']))
+
+    results = await asyncio.gather(*tasks)
+
+        # Assign results back to posts
+        # Die results stehen in der Reihenfolge, in der die Tasks generiert wurden, 
+        # wir replizieren also im Prinzip die Schleife von oben. 
+    index = 0
+    for post in posts:
+        if check_images:
+            if post['video'] is not None and post['video'].get('file', None) is not None:
+                post['video']['transcription'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+            if post['photo'] is not None and post['photo'].get('file', None) is not None:
+                post['photo']['description'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+            if post['voice'] is not None and post['voice'].get('file', None) is not None:
+                post['voice']['transcription'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+            if post['sticker'] is not None and post['sticker'].get('file', None) is not None:
+                post['sticker']['description'] = results[index]
+                post['aiornot_ai_score'] = results[index+1]
+                index += 2
+
+        if post['text'] is not None and check_texts:
+            post['detectora_ai_score'] = results[index]
+            index +=1
+
+    return posts
+
+
+
+def ig_evaluate(posts, check_texts = True, check_images = True):
+    return asyncio.run(ig_evaluate_async(posts, check_texts= check_texts, check_images=check_images))
+
+def ig_evaluate_old(posts, check_texts=True, check_images=True):
     # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
     # und AIORNOT. 
     for post in posts:
@@ -236,25 +349,8 @@ def ig_evaluate(posts, check_texts=True, check_images=True):
             post['aiornot_ai_score'] = max_ai_score
     return posts
 
-def ig_hydrate(posts): 
-    # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
-    # erstellt Beschreibungen und Transkriptionen. 
-    # 
-    # Fernziel: Asynchrone Verarbeitung. 
-    for post in posts:
-        # Transkription des Videos und Beschreibung des Thumbnails
-        if 'videos' in post:
-            for idx, video_url in enumerate(post['videos']):
-                vfile = save_url(video_url, f"{post['code']}_video_{idx}")
-                post['videos'][idx] = {'url': video_url, 'file': vfile, 'transcription': transcribe(vfile)}
-        
-        if 'images' in post:
-            for idx, image_url in enumerate(post['images']):
-                pfile = save_url(image_url, f"{post['code']}_image_{idx}")
-                image = base64.b64encode(requests.get(image_url).content).decode('utf-8')
-                post['images'][idx] = {'url': image_url, 'file': pfile, 'description': gpt4_description(f"data:image/jpeg;base64, {image}")}
-    
-    return posts
+
+#### Handling der CSV
 
 def retrieve_ig_csv(cname, path= "ig-checks"):
     fname = path + "/" + cname + ".csv"

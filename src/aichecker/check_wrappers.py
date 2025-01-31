@@ -2,6 +2,10 @@ from .detectora import query_detectora
 # from .aiornot import query_aiornot
 from .transcribe import gpt4_description
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import os
+import requests 
 
 # Alternative zu meinen selbst geschriebenen aiornot-Routinen: 
 # https://github.com/aiornotinc/aiornot-python
@@ -80,43 +84,6 @@ def aiornot_wrapper(content, is_image = True):
     else:
         print("\b,")
         return None
-
-## ACHTUNG: CODE NOCH NICHT ANGEPASST UND GETESTET
-async def async_aiornot_wrapper(content, is_image = True):
-    # Create a client (reads AIORNOT_API_KEY env)
-    async_client = AsyncClient()
-    # Check if the API is up
-    if not await async_client.is_live():
-        logging.error("AIORNOT API nicht erreichbar")
-        exit(1)
-    # Check your token
-    resp = await async_client.check_token()
-    if not resp.is_valid:
-        logging.error("AIORNOT-API-Token nicht gültig")
-        exit(1)
-    is_url = (content.startswith("http://") or content.startswith("https://"))
-    if is_image:
-        if is_url:
-            response = await async_client.image_report_by_url(content)
-        else:
-            response = await async_client.image_report_by_file(content)
-    else: # (Audio)
-        if is_url: 
-            response = await async_client.audio_report_by_url(content)
-        else:
-            response = await async_client.audio_report_by_file(content)
-    if response is None: 
-        return response
-    else:
-        aiornot_dict = ({
-            'score': response.report.verdict,
-            # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
-            # Audios SOLLTEN eien Confidence-Wert in response.report.confidence haben, haben es aber nicht
-            'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else .99,
-            'generator': object_to_dict(response.report.generator) if hasattr(response.report, 'generator') else None,
-        })
-        print(f"\b{'X' if aiornot_dict['score'] != 'human' else '.'}",end="")
-        return aiornot_dict
         
 def bsky_aiornot_wrapper(did,embed):
     # Verpackung für die AIORNOT-Funktion: 
@@ -137,3 +104,117 @@ def bsky_aiornot_wrapper(did,embed):
     else:
         print("\b_",end="")
         return None
+    
+    
+    # Wrapper für Describe und transcribe aus transcribe.py
+# Parallelisieren von eigentlich synchronen Routinen: Aufruf in ThreadPoolExecutor einklinken
+async def describe_async(image_data):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, gpt4_description, image_data)
+    return result
+
+async def transcribe_async(file):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, transcribe, file)
+    return result
+
+# Wrapper für AIORNOT-Check
+# Das ist im Augenblick ein wenig geschummelt; es gibt ja eine asynchrone AIORNOT-Routine. 
+# Die baue ich im nächsten Schritt ein. 
+async def aiornot_async(file, is_image=True):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, aiornot_wrapper, file, is_image)
+    return result
+
+# Wrapper für Detectora-Check
+# Auch hier könnte man unter der Oberfläche einen parallelisierbaren API-Aufruf bauen. 
+async def detectora_async(text):
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        result = await loop.run_in_executor(pool, detectora_wrapper, text)
+    return result
+
+# Hive-Detektor-Aufruf, einmal synchron und einmal asynchron. 
+# Gibt ein dict zurück: 
+# {
+#   'ai_score': real,
+#   'most_likely_model': string,
+#   'models': [ {'class': string, 'score': real}, ... ]
+# }
+def hive_visual(content):
+    url = 'https://api.thehive.ai/api/v2/task/sync'
+    api_key = os.environ.get('HIVE_VISUAL_API_KEY')
+    if api_key is None or api_key == "":
+        logging.error("Kein API-Key für Hive Visual Detection")
+        return None
+    headers = {'Authorization': f"Token {api_key}"}
+    if content.startswith("http://") or content.startswith("https://"):
+        data= {'url': content}
+        response = requests.post(url, headers=headers, data=data)
+        response = response.json()
+    else: 
+        # Datei als Input
+        try:
+            binary = open(content, 'rb')
+        except FileNotFoundError:
+            logging.error(f"Datei {content} nicht gefunden")
+            return None
+        files = {'image': binary}
+        response = requests.post(url, headers=headers, files=files)
+        response = response.json()
+        scores = response.output.classes
+        score = {'models': []}
+        max = 0
+        for s in scores: 
+            if s['class'] == 'ai_generated':
+                score['ai_score'] = s['score']
+            else:
+                score['models'].append(s)
+                if s['score'] > max:
+                    max = s['score']
+                    score['most_likely_model'] = s['class']
+        return score
+
+# Hive-Check Visual Content
+# Parallelisiert
+async def hive_visual_async(session, content):
+    url = 'https://api.thehive.ai/api/v2/task/sync'
+    api_key = os.environ.get('HIVE_VISUAL_API_KEY')
+    if api_key is None or api_key == "":
+        logging.error("Kein API-Key für Hive Visual Detection")
+        return None
+    headers = {'Authorization': f"Token {api_key}"}
+    if content.startswith("http://") or content.startswith("https://"):
+        data = {'url': content}
+        async with session.post(url, headers=headers, data=data) as response:
+            response = await response.json()
+            return response
+    # Datei als Input
+    else:
+        try: 
+            binary = open('content', 'rb')
+        except FileNotFoundError:
+            logging.error(f"Datei {content} nicht gefunden")
+            return None
+        files = {'image': binary}
+        async with session.post(url, headers=headers, files=files, data=data) as response:
+            response = await response.json()
+            # Eine List of dicts zurückgeben, die so aufgebaut ist: 
+            # [{'class': class, 'score': confidence}, ...]
+            # Die erste ist: {'class': 'ai_generated', 'score': score}
+            scores = response.output.classes
+            score = {'models': []}
+            max = 0
+            for s in scores: 
+                if s['class'] == 'ai_generated':
+                    score['ai_score'] = s['score']
+                else:
+                    score['models'].append(s)
+                    if s['score'] > max:
+                        max = s['score']
+                        score['most_likely_model'] = s['class']
+            return score
+    return None    
