@@ -260,8 +260,8 @@ def ig_post_parse(instagram_data, save=False, describe=False):
     
     return posts
 
-def igc_read_posts(cname, n=12, save=False, describe=False):
-    """ Liest die n letzten Posts eines Instagram Profils aus.
+def igc_read_posts_until(cname, cutoff="1970-01-01 00:00:00", save=False, describe=False):
+    """ Liest ein Insta-Profil aus, bis das Cutoff-Datum erreicht ist oder nix mehr da.
 
     Args:
         cname (str): Name des Profils
@@ -270,16 +270,60 @@ def igc_read_posts(cname, n=12, save=False, describe=False):
         describe (bool, optional): Medien beschreiben/transkribieren. Legacy. Defaults to False.
 
     Returns:
-        List of dict: 
-            'timestamp': timestamp,
-            'text': caption, text
-            'hashtags': a list of hashtags
-            'mentions': a list of mentions
-            'location': location as a dict containing lat, lon, location
-            'likes': number of likes, int
-            'comment_count': number of comments, int
-            'images': images, a list of dict {url}
-            'videos': videos, a list of dict {url}        
+        siehe oben igc_parse_posts
+    """
+
+    conn = http.client.HTTPSConnection("instagram-scraper-api2.p.rapidapi.com")
+    headers = {
+        'x-rapidapi-key': os.getenv('RAPIDAPI_KEY'),
+        'x-rapidapi-host': "instagram-scraper-api2.p.rapidapi.com"
+    }
+
+    posts = []
+    pagination_token = ""
+    read_on = True
+    while read_on:
+        if pagination_token == "":
+            conn.request("GET", f"/v1.2/posts?username_or_id_or_url={cname}", headers=headers)
+        else: 
+            conn.request("GET", f"/v1.2/posts?username_or_id_or_url={cname}&pagination_token={pagination_token}", headers=headers)
+        res = conn.getresponse()
+        data = json.loads(res.read().decode("utf-8"))
+        pagination_token = data.get('pagination_token', "")
+        # Fehler werden als Key "detail" zurückgegeben
+        if 'detail' in data:
+            e = data.get('detail')
+            print(f"Instagram-API-Fehler: {e}")
+            logging.error(f"Instagram-API-Fehler: {e}")
+            return None
+        
+        # Frühesten gelesenen Zeitstempel ermitteln
+        min_ts = min(d['taken_at_timestamp'] for d in data['data']['items'])
+        if min_ts <= cutoff:
+            read_on = False
+            new_posts = [d for d in data['data']['items'] if d['taken_at_timestamp'] > cutoff]
+            posts.extend(new_posts)
+        else:
+            posts.extend(data['data']['items'])
+        pagination_token = data.get('pagination', "")
+
+        if not pagination_token:
+            break
+
+    # Die Posts parsen und die URLS der Videos und Fotos extrahieren
+    return ig_post_parse(posts[:n], save=save, describe=describe)
+
+def igc_read_posts(cname, n=12, save=False, describe=False):
+    """ Liest die n letzten Posts eines Instagram Profils aus.
+
+    Args:
+        cname (str): Name des Profils
+        cutoff (str, optional): Datetime-isoformat-String mit dem Datum, bei dem aufgehört werden soll 
+        save (bool, optional): Medien abspeichern. Legacy. Defaults to False.
+        describe (bool, optional): Medien beschreiben/transkribieren. Legacy. Defaults to False.
+
+    Returns:
+        siehe oben igc_parse_posts
     """
 
     conn = http.client.HTTPSConnection("instagram-scraper-api2.p.rapidapi.com")
@@ -313,7 +357,7 @@ def igc_read_posts(cname, n=12, save=False, describe=False):
             break
 
     # Die Posts parsen und die URLS der Videos und Fotos extrahieren
-    return ig_post_parse(posts[:n], save=save, describe=describe)
+    return ig_post_parse(posts, save=save, describe=describe)
 
 
 def igc_read_stories(cname, save=False, describe=False):
