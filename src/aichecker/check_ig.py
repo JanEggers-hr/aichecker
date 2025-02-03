@@ -510,7 +510,7 @@ def ig_reimport_csv(fname):
     return df
     
     
-def append_ig_csv(cname, posts_list, path = "ig-checks"):
+def ig_append_csv(cname, posts_list, path = "ig-checks"):
     existing_df = ig_reimport_csv(cname, path)
     df = pd.DataFrame(posts_list)
     if existing_df is not None: 
