@@ -207,7 +207,13 @@ def ig_post_parse(instagram_data, save=False, describe=False):
             for i in item['carousel_media']:
                 if 'image_versions' in i:
                     # Erstes Bild ist die Originalversion, das reicht
-                    media.append({'type': 'image', 'url': i['image_versions']['items'][0]['url']})
+                    # media.append({'type': 'image', 'url': i['image_versions']['items'][0]['url']})
+                    # Bringt aber AIORNOT durcheinander, deshalb das zweite
+                    try:
+                        media.append({'type': 'image', 'url': i['image_versions']['items'][1]['url']})
+                    except:
+                        media.append({'type': 'image', 'url': i['image_versions']['items'][0]['url']})
+                    
                 if 'video_url' in i:
                     media.append({'type': 'video', 'url': i['video_url']})
         else:
@@ -219,8 +225,13 @@ def ig_post_parse(instagram_data, save=False, describe=False):
             else: 
                 type = 'image'
                 if 'image_versions' in item:
-                # Erstes Bild ist die Originalversion, das reicht
-                    media.append({'type': 'image', 'url': item['image_versions']['items'][0]['url']})
+                # Erstes Bild ist die Originalversion
+                # Zweites Bild ist etwas kleliner
+                    try: 
+                        media.append({'type': 'image', 'url': item['image_versions']['items'][1]['url']})
+                    except:
+                        media.append({'type': 'image', 'url': i['image_versions']['items'][0]['url']})
+
         
         # Construct post dictionary
         
@@ -260,7 +271,7 @@ def ig_post_parse(instagram_data, save=False, describe=False):
     
     return posts
 
-def igc_read_posts_until(cname, cutoff="1970-01-01 00:00:00", save=False, describe=False):
+def igc_read_posts_until(cname, cutoff="1970-01-01T00:00:00", save=False, describe=False):
     """ Liest ein Insta-Profil aus, bis das Cutoff-Datum erreicht ist oder nix mehr da.
 
     Args:
@@ -422,12 +433,14 @@ async def ig_hydrate_async(posts, mdir="./media"):
     async with aiohttp.ClientSession() as session:
         tasks = []
         for post in posts:
+            i = 0
             if 'media' in post: 
                 id = post['id']
                 for m in post['media']: 
                     type = m['type']
                     url = m['url']
-                    tasks.append(save_url_async(session, url, f"{post['id']}_{type}_{id}", mdir))
+                    tasks.append(save_url_async(session, url, f"{id}_{type}_{i}", mdir))
+                    i += 1
                     
         results = await asyncio.gather(*tasks)
         # Assign results back to posts
@@ -456,10 +469,38 @@ def ig_evaluate(posts: List[Dict[str, Any]], check_texts: bool = True, check_ima
 # Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
 # Routine fragt asynchron die APIs von AIORNOT und Hive ab
 # und lässt Audio-Inhalte transkribieren/Bilder beschreiben
+# Fügt folgende Spalten im Post-Dict hinzu:
+# - aiornot_ai_max_score
+# - hive_visual_ai_max_score
+#
+# In den Einträgen in der Liste in ['media'] werden die folgenden Keys in den Einträgen ergänzt:
+# - 'file' (Pfad zur Datei)
+# - 'transcription' (bei Videos) / 'description' (bei Bildern)
+# - 'aiornot_ai_score' (dict)
+#   - 'score'
+#   - 'confidence'
+#   - 'generator' (list)
+# - 'hive_visual_ai' (dict)
+#   - 'ai_score'
+#   - 'most_likely_model'
+#   - 'models' [ {'class': string, 'score': real}, ... ]
+
+# Die Routine kann auch nur die Texte oder nur die Bilder checken lassen.
+# Wenn check_texts = False, dann wird der Text nicht gecheckt.
+# Wenn check_images = False, dann werden die Bilder nicht gecheckt.
+
 async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
-#    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession() as session:
 # war mal für das asynchrone Auslesen der Hive-API, aber das geht nicht - siehe unten
         tasks = []
+        # Semaphore to keep it to 1 call at a time
+        semaphore = asyncio.Semaphore(1)
+        async def hive_visual_with_delay(file_path, semaphore):
+            async with semaphore:
+                result = await hive_visual_async(session,file_path)
+                await asyncio.sleep(1)  # Rate limit delay
+                return result
+         
         for post in posts:
             if check_images:
                 for m in post['media']:
@@ -474,9 +515,11 @@ async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = Tru
                             image_data = base64.b64encode(f.read()).decode('utf-8')
                         tasks.append(describe_async(f"data:image/jpeg;base64,{image_data}"))
                         tasks.append(aiornot_async(file_path, is_image=True))
+                    # Add hive_visual_async task with rate limit
+                    tasks.append(hive_visual_with_delay(file_path, semaphore))
+                    
                     # Hive Visual AI kann leider nicht asynchron abgefragt werden,
                     # deshalb synchron und hoffentlich parallel zu den Transkriptionen und AiOrnot-Anfragen
-                    m['hive_visual_ai'] = hive_visual(m.get('file'))
             if check_texts and post.get('text'):
                 tasks.append(detectora_async(post['text']))
 
@@ -494,12 +537,14 @@ async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = Tru
                         m['transcription'] = results[index]
                     aiornot = results[index+1]
                     m['aiornot_ai_score'] = aiornot
-                    if aiornot is not None and aiornot_max < aiornot.get('score',0):
-                        aiornot_max = aiornot.get('score',0)
-                    index += 2
+                    if aiornot is not None and aiornot_max < aiornot.get('confidence',0):
+                        aiornot_max = aiornot.get('confidence',0)
+                    hive = results[index+2]
+                    m['hive_visual_ai'] = hive
+                    index += 3
                     # jetzt den jeweils höchsten HiveScore nehmen
-                    if m['hive_visual_ai'] is not None and hive_max < m['hive_visual_ai'].get('ai_score',0):
-                        hive_max = m['hive_visual_ai'].get('ai_score',0)
+                    if hive is not None and hive_max < hive.get('ai_score',0):
+                        hive_max = hive.get('ai_score',0)
                 post['aiornot_ai_max_score'] = aiornot_max
                 post['hive_visual_ai_max_score'] = hive_max
             if check_texts and post.get('text'):
@@ -554,10 +599,14 @@ def ig_reimport_csv(fname):
     return df
     
     
-def ig_append_csv(cname, posts_list, path = "ig-checks"):
-    existing_df = ig_reimport_csv(cname, path)
+def ig_append_csv(handle, posts_list, path = "ig-checks"):
+    filename = f'{path}/{handle}.csv'
+    if os.path.exists(filename):
+        existing_df = ig_reimport_csv(filename)
+    else:
+        existing_df = pd.DataFrame()
     df = pd.DataFrame(posts_list)
     if existing_df is not None: 
         df = pd.concat([existing_df, df]).drop_duplicates(subset=['uri']).reset_index(drop=True)
-    df.to_csv(path + "/" + cname + ".csv", index=False)
+    df.to_csv(filename, index=False)
 

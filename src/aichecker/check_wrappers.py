@@ -164,7 +164,7 @@ async def transcribe_async(file):
 
 # Wrapper für AIORNOT-Check
 # Das ist im Augenblick ein wenig geschummelt; es gibt ja eine asynchrone AIORNOT-Routine. 
-# Die baue ich im nächsten Schritt ein. 
+# Die wirft aber Fehler. 
 async def aiornot_async(file, is_image=True):
     return await aiornot_wrapper_async(file, is_image)
 

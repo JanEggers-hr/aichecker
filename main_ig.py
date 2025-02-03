@@ -9,9 +9,8 @@ AIORNOT_T = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.
 TEST = False
 
 
-
-
 if __name__ == "__main__":
+    logging.basicConfig(filename='logfile.log', level=logging.DEBUG)
     # ig_check
     handle_str = input("Handle des Kanals eingeben: ")
     #handle_str = "telegram"
@@ -74,4 +73,4 @@ if __name__ == "__main__":
     print(f" - Texte: {n_texts}, davon KI-verdächtig: {n_ai_texts} (Schwelle: {DETECTORA_T})")
     print(f" - Bilder: {n_images}, davon KI-verdächtig: {n_ai_images} (Schwelle: {AIORNOT_T})")
     print(f"Ergebnis wird in 'ig-checks/{handle}.csv' mit abgespeichert. ")
-    append_ig_csv(handle, checked_posts, path="ig-checks")
+    ig_append_csv(handle, checked_posts, path="ig-checks")
