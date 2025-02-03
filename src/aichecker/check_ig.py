@@ -496,9 +496,9 @@ async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = Tru
         # Semaphore to keep it to 1 call at a time
         semaphore = asyncio.Semaphore(1)
         async def hive_visual_with_delay(file_path, semaphore):
-            async with semaphore:
+#            async with semaphore:
                 result = await hive_visual_async(session,file_path)
-                await asyncio.sleep(1)  # Rate limit delay
+                await asyncio.sleep(1.1)  # Rate limit delay
                 return result
          
         for post in posts:
