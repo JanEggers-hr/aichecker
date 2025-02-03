@@ -1,9 +1,10 @@
-# tg_check.py
+# check_ig.py
 #
-# Mistral-Übersetzung aus R (mein altes Rtgchannels-Projekt V0.1.1)
-# Angepasst auf Listen statt Dataframes
+# Instagram-Profile und -posts auslesen und auf KI prüfen
+# Nutzt einen über RAPIDAPI.com eingekauften und eingebundenen Scraper:
+# https://rapidapi.com/social-api1-instagram/api/instagram-scraper-api2
 #
-# 1-2025 Jan Eggers
+# 2-2025 Jan Eggers, Basiscode von Manuel Paas https://github.com/manuelpaas
 
 import pandas as pd
 import requests
@@ -14,11 +15,21 @@ import os
 import re
 import base64
 import logging
+
+# Funktionen in der aichecker-Library
 from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
-from .check_wrappers import detectora_wrapper, aiornot_wrapper, transcribe_async, describe_async, detectora_async, aiornot_async
+from .check_wrappers import detectora_wrapper, aiornot_wrapper, transcribe_async, describe_async, detectora_async, aiornot_async, hive_visual, hive_visual_async
 from .save_urls import save_url_async, save_url
-import asyncio
+
+# Sonstige Bibliotheken
+from ast import literal_eval # Strings in Objekte konvertieren
+import asyncio # Asynchrone Funktionen
 import aiohttp
+from typing import List, Dict, Any, Optional # Typisierung für besseres Handling der Libraries
+
+#################################
+# BLOCK 1: Profil-Informationen #
+#################################
 
 def igc_profile(username="mrbeast"):
     """
@@ -31,11 +42,19 @@ def igc_profile(username="mrbeast"):
     dict with the keys 
     - 'username'
     - 'biography'
-    - 'profile_pic_url'
+    - 'country'
+    - 'profile_pic_url' (high resolution)
+    - 'external_url'
+    - 'full_name'
+    - 'is_private' (boolean)
+    - 'is_verified' (boolean)
+    - 'following_count' (Number)
     - 'follower_count' (Number)
     - 'media_count' (number)
-    - 'created' (date joined)
-
+    - 'created' (isoformat string with datetime)
+    - 'query_ts': Abfrage-Timestamp (um Veränderungen bei den Likes tracken zu können)
+            
+    
     Example: 
     profile = igc_profile("mrbeast")
     profile = igc_profile("nonexistentuser") # returns None
@@ -51,20 +70,33 @@ def igc_profile(username="mrbeast"):
         conn.request("GET", f"/v1/info?username_or_id_or_url={username}&include_about=true", headers=headers)
         res = conn.getresponse()
         data = json.loads(res.read().decode("utf-8")).get('data', {})
+        query_ts = datetime.now().isoformat()
     except Exception as e:
         logging.warning(f"Warning: User {username} not found. Error: {e}")
         return None
 
     if not data:
         return None
+    
+    # Timestamp is Unix timestamp, convert to datetime
+    joined_raw = data.get('about', {}).get('date_joined_as_timestamp')
+    joined_datetime = datetime.fromtimestamp(joined_raw) if joined_raw else None
+    joined = joined_datetime.isoformat() if joined_datetime else None
 
     profile_info = {
         'username': data.get('username'),
         'biography': data.get('biography'),
-        'profile_pic_url': data.get('profile_pic_url'),
+        'country': data.get('about',{}).get('country'),
+        'profile_pic_url': data.get('profile_pic_url_hd'),
+        'external_url': data.get('external_url'),
+        'full_name': data.get('full_name'),
+        'is_private': data.get('is_private'),
+        'is_verified': data.get('is_verified'),
+        'following_count': data.get('following_count'),
         'follower_count': data.get('follower_count'),
         'media_count': data.get('media_count'),
-        'created': data.get('about', {}).get('date_joined')
+        'created': joined,
+        'query_ts': query_ts
     }
 
     return profile_info
@@ -102,63 +134,153 @@ def igc_clean(cname):
     
     return None
 
-def ig_post_parse(instagram_data, save=True, describe=True):
+##################################################
+# BLOCK 2: Posts und Stories auslesen und parsen #
+##################################################
+
+def ig_post_parse(instagram_data, save=False, describe=False):
+    """ ig_post_parse - Takes rapidapi instagram data output and parses the media.
+
+    Args:
+        instagram_data ([dict]): a list of dicts  
+        save (bool, optional): save media to disk. Defaults to False.
+        describe (bool, optional): describe/transcribe media. Defaults to False. NB: describe includes save!
+
+    Returns:
+        List of dict: 
+            'id': post id (URL ist: https://www.instagram.com/p/{id}/)
+            'timestamp': timestamp,
+            'query_ts': Abfrage-Timestamp (um Veränderungen bei den Likes tracken zu können)
+            'text': caption, text
+            'hashtags': a list of hashtags
+            'mentions': a list of mentions
+            'location': location as a dict containing the address (or None if none is given)#
+                'id' : location id
+                'name': location name
+                'street_address': location.get('address_json', {}).get('street_address', None),
+                'zip_code': location.get('address_json', {}).get('zip_code', None),
+                'city_name': location.get('address_json', {}).get('city_name', None),
+                'region_name': location.get('address_json', {}).get('region_name', None),
+                'country_code': US, DE etc.
+            ' 
+            'likes': number of likes, int
+            'comment_count': number of comments, int
+            'type': one in ['image', 'video', 'carousel']
+            'media': a list of dicts containing elements: {
+                'type': ('video', 'image'), 
+                'url': url, 
+                'file': local file if saved
+                'description' / 'transcription': just that if describe was set
+            
+    """
     posts = []
-    for item in instagram_data['data']['items']:
+    for item in instagram_data:
+        query_ts = datetime.now().isoformat()
         # Extract post details
-        post_code = item.get('code', None)
+        post_code = item.get('id', None)
         timestamp = datetime.fromtimestamp(item.get('taken_at_ts', 0)).isoformat()
         caption = item.get('caption', {}).get('text', None)
+        hashtags = item.get('caption', {}).get('hashtags', [])
+        mentions = item.get('caption', {}).get('mentions', [])
+        location = item.get('location', None)
+        if location:
+            location = {
+                'id' : location.get('id', None),
+                'name': location.get('name', None),
+                'street_address': location.get('address_json', {}).get('street_address', None),
+                'zip_code': location.get('address_json', {}).get('zip_code', None),
+                'city_name': location.get('address_json', {}).get('city_name', None),
+                'region_name': location.get('address_json', {}).get('region_name', None),
+                'country_code': location.get('address_json', {}).get('country_code', None),
+                
+            }
+        else:
+            location = None
         
         # Extract media details
-        images = []
-        videos = []
+        media = []
         
         # Check for carousel media
+        # Kann Image und Video gemischt enthalten
         if 'carousel_media' in item:
-            for media in item['carousel_media']:
-                if 'image_versions' in media:
-                    for image in media['image_versions']['items']:
-                        images.append(image['url'])
-                if 'video_url' in media:
-                    videos.append(media['video_url'])
+            type = 'carousel'
+            for i in item['carousel_media']:
+                if 'image_versions' in i:
+                    # Erstes Bild ist die Originalversion, das reicht
+                    media.append({'type': 'image', 'url': i['image_versions']['items'][0]['url']})
+                if 'video_url' in i:
+                    media.append({'type': 'video', 'url': i['video_url']})
         else:
             # Single image or video
-            if 'image_versions' in item:
-                for image in item['image_versions']['items']:
-                    images.append(image['url'])
+            
             if 'video_url' in item:
-                videos.append(item['video_url'])
+                media.append({'type': 'video', 'url': item['video_url']})
+                type = 'video'
+            else: 
+                type = 'image'
+                if 'image_versions' in item:
+                # Erstes Bild ist die Originalversion, das reicht
+                    media.append({'type': 'image', 'url': item['image_versions']['items'][0]['url']})
         
         # Construct post dictionary
-        post_dict = {
-            'code': post_code,
-            'timestamp': timestamp,
-            'caption': caption,
-            'images': images,
-            'videos': videos,
-        }
         
         # Save media if required
-        if save:
-            for idx, image_url in enumerate(images):
-                save_url(image_url, f"{post_code}_image_{idx}")
-            for idx, video_url in enumerate(videos):
-                save_url(video_url, f"{post_code}_video_{idx}")
+        if save or describe:
+            for i in range(len(media)):
+                media_type = media[i]['type']
+                media_url = media[i]['url']
+                media[i]['file'] = save_url(media_url, f"{post_code}_{media_type}_{idx}")
+        
         
         # Describe media if required
         if describe:
-            for image_url in images:
-                image = base64.b64encode(requests.get(image_url).content).decode('utf-8')
-                post_dict['image_description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
-            for video_url in videos:
-                post_dict['video_transcription'] = transcribe(video_url)
+            for i in range(len(media)):
+                media_type = media[i]['type']
+                media_file = media[i]['file']
+                if media_type == 'image':
+                    image = base64.b64encode(open(media_file, 'rb').read()).decode('utf-8')
+                    media[i]['description'] = gpt4_description(f"data:image/jpeg;base64, {image}")
+                else:
+                    media[i]['transcription'] = transcribe(media_file)
+        
+        post_dict = {
+            'id': post_code,
+            'timestamp': timestamp,
+            'text': caption,
+            'hashtags': hashtags,
+            'mentions': mentions,
+            'location': item.get('location', None),
+            'likes': item.get('like_count', 0),
+            'comment_count': item.get('comment_count', 0),
+            'type': type,
+            'media': media
+        }
         
         posts.append(post_dict)
     
     return posts
 
-def igc_read_posts(cname, n=12):
+def igc_read_posts(cname, n=12, save=False, describe=False):
+    """ Liest die n letzten Posts eines Instagram Profils aus.
+
+    Args:
+        cname (str): Name des Profils
+        n (int, optional): Anzahl der Posts. Defaults to 12.
+        save (bool, optional): Medien abspeichern. Legacy. Defaults to False.
+        describe (bool, optional): Medien beschreiben/transkribieren. Legacy. Defaults to False.
+
+    Returns:
+        List of dict: 
+            'timestamp': timestamp,
+            'text': caption, text
+            'hashtags': a list of hashtags
+            'mentions': a list of mentions
+            'location': location as a dict containing lat, lon, location
+            'likes': number of likes, int
+            'comment_count': number of comments, int
+            'images': images, a list of dict {url}
+            'videos': videos, a list of dict {url}        
+    """
 
     conn = http.client.HTTPSConnection("instagram-scraper-api2.p.rapidapi.com")
     headers = {
@@ -170,9 +292,19 @@ def igc_read_posts(cname, n=12):
     pagination_token = ""
 
     while len(posts) < n:
-        conn.request("GET", f"/v1.2/posts?username_or_id_or_url={cname}&pagination_token={pagination_token}", headers=headers)
+        if pagination_token == "":
+            conn.request("GET", f"/v1.2/posts?username_or_id_or_url={cname}", headers=headers)
+        else: 
+            conn.request("GET", f"/v1.2/posts?username_or_id_or_url={cname}&pagination_token={pagination_token}", headers=headers)
         res = conn.getresponse()
         data = json.loads(res.read().decode("utf-8"))
+        pagination_token = data.get('pagination_token', "")
+        # Fehler werden als Key "detail" zurückgegeben
+        if 'detail' in data:
+            e = data.get('detail')
+            print(f"Instagram-API-Fehler: {e}")
+            logging.error(f"Instagram-API-Fehler: {e}")
+            return None
 
         posts.extend(data['data']['items'])
         pagination_token = data.get('pagination', "")
@@ -180,8 +312,65 @@ def igc_read_posts(cname, n=12):
         if not pagination_token:
             break
 
-    return posts[:n]
+    # Die Posts parsen und die URLS der Videos und Fotos extrahieren
+    return ig_post_parse(posts[:n], save=save, describe=describe)
 
+
+def igc_read_stories(cname, save=False, describe=False):
+    """ Liest die sichtbaren Stories aus. Zwingt sie in die gleiche Logik wie Posts. 
+    D.h.: Videos werden unter "videos" als einziger Eintrag in einer Liste gespeichert,
+    Images  
+    
+    Args:
+        cname (str): der Name des Profils
+        save (bool): ob die Medien gespeichert werden sollen
+        describe (bool): ob die Medien beschrieben werden sollen
+
+    Ausgabe: siehe oben igc_parse_posts
+    """
+    
+    conn = http.client.HTTPSConnection("instagram-scraper-api2.p.rapidapi.com")
+    headers = {
+        'x-rapidapi-key': os.getenv('RAPIDAPI_KEY'),
+        'x-rapidapi-host': "instagram-scraper-api2.p.rapidapi.com"
+    }
+
+    conn.request("GET", f"/v1.2/stories?username_or_id_or_url={cname}", headers=headers)
+    res = conn.getresponse()
+    data = json.loads(res.read().decode("utf-8"))
+
+    posts = data['data']['items']
+    parsed_posts =[]
+    # Stories parsen: (Wissensstand: 3.2.2025)
+    # Es gibt grundsätzlich zwei Arten von Stories, Video-Stories und Bilderstories.
+    # - Bilder-Stories: Eine Liste von Bild-Urls in 
+    # - Video-Stories: URL des Videos in ['video_url']
+    for post in posts:
+        parsed_post = {
+            'id': post['code'],
+            'timestamp': post['taken_at_date'], # Highlights haben nur ein Unix-TS in created_at
+            'caption': post['caption'],
+            'hashtags': None,
+            'mentions': None,
+            'location': None, 
+        }
+        # Mentions im Key: reel_mentions
+        mentions_raw = post.get('reel_mentions',[])
+        parsed_post['mentions'] = [{'username': mention['user']['username']} for mention in mentions_raw]
+        if 'video_url' in post:
+            parsed_post['videos'] = [{'url': post['video_url']}]
+        else:
+            images = []
+            for image in post['image_versions'].get('items',[]):
+                images.append({'url': image['url']})
+            parsed_post['images'] = images
+            # Mentions im Key: 
+        parsed_posts.append(parsed_post)
+    return parsed_posts
+
+########################################
+### Block 3: Hydrieren und auswerten ###
+########################################
 # Die Post-Dicts hydrieren, d.h.: die URLs dazu laden und abspeichern
 
 async def ig_hydrate_async(posts, mdir="./media"):
@@ -189,53 +378,29 @@ async def ig_hydrate_async(posts, mdir="./media"):
     async with aiohttp.ClientSession() as session:
         tasks = []
         for post in posts:
-            if 'videos' in post: 
-                for idx, video_url in enumerate(post['videos']):
-                    save_url_async(session, video_url, f"{post['code']}_video_{idx}", mdir)
-            if 'images' in post:
-                for idx, image_url in enumerate(post['images']):   
-                    save_url_async(session, image_url, f"{post['code']}_image_{idx}", mdir)
+            if 'media' in post: 
+                id = post['id']
+                for m in post['media']: 
+                    type = m['type']
+                    url = m['url']
+                    tasks.append(save_url_async(session, url, f"{post['id']}_{type}_{id}", mdir))
                     
         results = await asyncio.gather(*tasks)
         # Assign results back to posts
         index = 0
         for post in posts:
-            if 'videos' in post:
-                for idx, video_url in enumerate(post['videos']):
-                    vfile = results[index]
-                    post['videos'][idx] = {'url': video_url, 'file': vfile}
+            if 'media' in post:
+                for item in post['media']:
+                    item['file'] = results[index]
                     index += 1
-            if 'images' in post:
-                for idx, image_url in enumerate(post['images']): 
-                    ifile = results[index]
-                    post['images'][idx] = {'url': image_url, 'file': ifile}
-                    image += 1
+
     return posts
 
 def ig_hydrate(posts, mdir="./media"):
     return asyncio.run(ig_hydrate_async(posts, mdir))
 
-
-def ig_hydrate_old(posts): 
-    # Nimmt eine Liste von Posts und zieht die zugehörigen Dateien,
-    # erstellt Beschreibungen und Transkriptionen. 
-    # 
-    # Fernziel: Asynchrone Verarbeitung. 
-    for post in posts:
-        # Transkription des Videos und Beschreibung des Thumbnails
-        if 'videos' in post:
-            for idx, video_url in enumerate(post['videos']):
-                vfile = save_url(video_url, f"{post['code']}_video_{idx}")
-                post['videos'][idx] = {'url': video_url, 'file': vfile, 'transcription': transcribe(vfile)}
-        
-        if 'images' in post:
-            for idx, image_url in enumerate(post['images']):
-                pfile = save_url(image_url, f"{post['code']}_image_{idx}")
-                image = base64.b64encode(requests.get(image_url).content).decode('utf-8')
-                post['images'][idx] = {'url': image_url, 'file': pfile, 'description': gpt4_description(f"data:image/jpeg;base64, {image}")}
-    
-    return posts
-
+def ig_evaluate(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
+    return asyncio.run(ig_evaluate_async(posts, check_texts=check_texts, check_images=check_images))
 
 ## Routinen zum Check der letzten 20(...) Posts eines Telegram-Channels
 # analog zu check_handle in der check_bsky-Library
@@ -245,87 +410,59 @@ def ig_hydrate_old(posts):
 # Routine checkt eine Post-Liste, wie sie aus den ig_post_parse Routinen kommen.
 # Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
 # Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
+# Routine fragt asynchron die APIs von AIORNOT und Hive ab
+# und lässt Audio-Inhalte transkribieren/Bilder beschreiben
+async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
+#    async with aiohttp.ClientSession() as session:
+# war mal für das asynchrone Auslesen der Hive-API, aber das geht nicht - siehe unten
+        tasks = []
+        for post in posts:
+            if check_images:
+                for m in post['media']:
+                    media_type = m['type']
+                    file_path = m['file']
+                    # Transcription or description? Video gets transcription, image gets description
+                    if media_type == 'video': # Dann ist es ein Video
+                        tasks.append(transcribe_async(file_path))
+                        tasks.append(aiornot_async(convert_mp4_to_mp3(file_path), is_image=False))
+                    elif media_type == 'image':
+                        with open(file_path, 'rb') as f:
+                            image_data = base64.b64encode(f.read()).decode('utf-8')
+                        tasks.append(describe_async(f"data:image/jpeg;base64,{image_data}"))
+                        tasks.append(aiornot_async(file_path, is_image=True))
+                    # Hive Visual AI kann leider nicht asynchron abgefragt werden,
+                    # deshalb synchron und hoffentlich parallel zu den Transkriptionen und AiOrnot-Anfragen
+                    m['hive_visual_ai'] = hive_visual(m.get('file'))
+            if check_texts and post.get('text'):
+                tasks.append(detectora_async(post['text']))
 
-async def ig_evaluate_async(posts, check_texts = True, check_images = True):
-    tasks = []
-    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
-    # und AIORNOT. 
-    for post in posts:
-        if ('detectora_ai_score' not in post) and check_texts:
-            # Noch keine KI-Einschätzung für den Text?
-            post['detectora_ai_score'] = detectora_wrapper(post.get('caption', ''))
+        results = await asyncio.gather(*tasks)
 
-    for post in posts:
-        if check_images:
-            if post['video'] is not None and post['video'].get('file', None) is not None:
-                vfile = post['video'].get('file')
-                # Asynchron Transkription und KI-Bewertung anfordern
-                tasks.append(transcribe_async(vfile))
-                # Audiofile konvertieren und transkribieren transkribieren
-                tasks.append(aiornot_async(convert_mp4_to_mp3(vfile), is_image=False))
-
-            if post['photo'] is not None and post['photo'].get('file', None) is not None:
-                pfile = post['photo']['file']
-                # Bild aus Datei in ein Objekt laden
-                with open(pfile, 'rb') as f:
-                    image_data = base64.b64encode(f.read()).decode('utf-8')
-                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
-                tasks.append(aiornot_async(pfile, is_image = True))
-
-            if post['voice'] is not None and post['voice'].get('file', None) is not None:
-                ofile = post['voice']['file']
-                afile = convert_ogg_to_mp3(ofile)
-                tasks.append(describe_async(afile))
-                tasks.append(aiornot_async(afile, is_image = False))
-
-            if post['sticker'] is not None and post['sticker'].get('file') is not None:  
-                sfile = post['sticker']['file'] 
-                with open(sfile, 'rb') as f:
-                    image_data = base64.b64encode(f.read()).decode('utf-8')          
-                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
-                tasks.append(aiornot_async(sfile, is_image = True))
-
-        if post['text'] is not None and check_texts:
-            tasks.append(detectora_async(post['text']))
-
-    results = await asyncio.gather(*tasks)
-
-        # Assign results back to posts
-        # Die results stehen in der Reihenfolge, in der die Tasks generiert wurden, 
-        # wir replizieren also im Prinzip die Schleife von oben. 
-    index = 0
-    for post in posts:
-        if check_images:
-            if post['video'] is not None and post['video'].get('file', None) is not None:
-                post['video']['transcription'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                index += 2
-
-            if post['photo'] is not None and post['photo'].get('file', None) is not None:
-                post['photo']['description'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                index += 2
-
-            if post['voice'] is not None and post['voice'].get('file', None) is not None:
-                post['voice']['transcription'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                index += 2
-
-            if post['sticker'] is not None and post['sticker'].get('file', None) is not None:
-                post['sticker']['description'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                index += 2
-
-        if post['text'] is not None and check_texts:
-            post['detectora_ai_score'] = results[index]
-            index +=1
-
-    return posts
-
-
-
-def ig_evaluate(posts, check_texts = True, check_images = True):
-    return asyncio.run(ig_evaluate_async(posts, check_texts= check_texts, check_images=check_images))
+        index = 0
+        for post in posts:
+            if check_images:
+                aiornot_max = 0
+                hive_max = 0
+                for m in post['media']:
+                    if m['type'] == 'image':
+                        m['description'] = results[index]
+                    else:
+                        m['transcription'] = results[index]
+                    aiornot = results[index+1]
+                    m['aiornot_ai_score'] = aiornot
+                    if aiornot is not None and aiornot_max < aiornot.get('score',0):
+                        aiornot_max = aiornot.get('score',0)
+                    index += 2
+                    # jetzt den jeweils höchsten HiveScore nehmen
+                    if m['hive_visual_ai'] is not None and hive_max < m['hive_visual_ai'].get('ai_score',0):
+                        hive_max = m['hive_visual_ai'].get('ai_score',0)
+                post['aiornot_ai_max_score'] = aiornot_max
+                post['hive_visual_ai_max_score'] = hive_max
+            if check_texts and post.get('text'):
+                post['detectora_ai_score'] = results[index]
+                index += 1
+# Eingerückt für die ausgeklammerte with session Anweisung oben
+        return posts
 
 def ig_evaluate_old(posts, check_texts=True, check_images=True):
     # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
@@ -352,18 +489,29 @@ def ig_evaluate_old(posts, check_texts=True, check_images=True):
 
 #### Handling der CSV
 
-def retrieve_ig_csv(cname, path= "ig-checks"):
-    fname = path + "/" + cname + ".csv"
-    if os.path.exists(fname):
-        df = pd.read_csv(fname)
-        # reformat the columns containing dicts
-        
-        return df
-    else:
+# Hilfsfunktion: CSV einlesen und als df ausgeben
+# Benötigt "from ast import literal_eval" 
+def convert_to_obj(val):
+    if pd.isna(val):
         return None
+    try:
+        return literal_eval(val) # Funktion aus der Llibrary ast
+    except (ValueError, SyntaxError):
+        return val
+
+# Hilfsfunktion: CSV einlesen und als df ausgeben
+def ig_reimport_csv(fname):
+    df = pd.read_csv(fname)
+    # Diese Spalten sind dict:
+    structured_columns = ['videos', 'images', 'aiornot_ai_score', 'hive_visual_ai']
+    for c in structured_columns:
+        if c in df.columns:
+            df[c] = df[c].apply(convert_to_obj)
+    return df
+    
     
 def append_ig_csv(cname, posts_list, path = "ig-checks"):
-    existing_df = retrieve_ig_csv(cname, path)
+    existing_df = ig_reimport_csv(cname, path)
     df = pd.DataFrame(posts_list)
     if existing_df is not None: 
         df = pd.concat([existing_df, df]).drop_duplicates(subset=['uri']).reset_index(drop=True)

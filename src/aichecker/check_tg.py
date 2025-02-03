@@ -19,11 +19,12 @@ import re
 import base64
 import logging
 from .transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
-from .check_wrappers import describe_async, transcribe_async, detectora_async, aiornot_async, hive_visual_async
+from .check_wrappers import describe_async, transcribe_async, detectora_async, aiornot_async, hive_visual
 from .save_urls import save_url_async
 import aiohttp
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict, Any, Optional
 
 def extract_k(n_str: str):
     try: 
@@ -387,38 +388,20 @@ async def tg_hydrate_async(posts, mdir="./media"):
         for post in posts:
             channel = post['channel']
             b_nr = post['nr']
-
-            if post['video'] is not None and post['video'].get('file', None) is None:
-                video_url = post['video'].get('url')
-                vfile = f"{channel}_{b_nr}_video"
-                tasks.append(save_url_async(session, video_url, vfile, mdir))
-            if post['photo'] is not None and post['photo'].get('file', None) is None:
-                photo_url = post['photo']['url']
-                pfile = f"{channel}_{b_nr}_photo"
-                tasks.append(save_url_async(session, photo_url, pfile, mdir))
-            if post['voice'] is not None and post['voice'].get('file', None) is None:
-                voice_url = post['voice']['url']
-                vfile = f"{channel}_{b_nr}_voice"
-                tasks.append(save_url_async(session, voice_url, vfile, mdir))
-            if post['sticker'] is not None and post['sticker'].get('file',None) is None:
-                sticker_url = post['sticker']['url']
-                sfile = f"{channel}_{b_nr}_sticker"
-                # Sticker sind idR WEBP.
-                tasks.append(save_url_async(session, sticker_url, sfile, mdir))
+            for k in ['video', 'photo', 'voice', 'sticker']:
+                if post[k] is not None and post[k].get('file', None) is None:
+                    url = post[k]['url']
+                    file = f"{channel}_{b_nr}_{k}"
+                    tasks.append(save_url_async(session, url, file, mdir))
         results = await asyncio.gather(*tasks)
 
         # Assign results back to posts
         index = 0
         for post in posts:
-            if post['video'] is not None and post['video'].get('file', None) is None:
-                post['video']['file'] = results[index]
-                index += 1
-            if post['photo'] is not None and post['photo'].get('file', None) is None:
-                post['photo']['file'] = results[index]
-                index += 1
-            if post['voice'] is not None and post['voice'].get('file', None) is None:
-                post['voice']['file'] = results[index]
-                index += 1
+            for k in ['video', 'photo', 'voice', 'sticker']:
+                if post[k] is not None and post[k].get('file', None) is None:
+                    post[k]['file'] = results[index]
+                    index += 1
     return posts
 
 def tg_hydrate(posts, mdir="./media"):
@@ -426,84 +409,63 @@ def tg_hydrate(posts, mdir="./media"):
 
 # Routine fragt asynchron die APIs von AIORNOT und Hive ab
 # und lässt Audio-Inhalte transkribieren/Bilder beschreiben
-async def tg_evaluate_async(posts, check_texts = True, check_images = True):
+async def tg_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
     async with aiohttp.ClientSession() as session:
         tasks = []
         for post in posts:
-            channel = post['channel']
-            b_nr = post['nr']
             if check_images:
-                if post['video'] is not None and post['video'].get('file', None) is not None:
-                    vfile = post['video'].get('file')
-                    # Asynchron Transkription und KI-Bewertung anfordern
-                    tasks.append(transcribe_async(vfile))
-                    # Audiofile konvertieren und transkribieren
-                    tasks.append(aiornot_async(convert_mp4_to_mp3(vfile), is_image=False))
-                    # Video-Erkennung bei Hive anfordern
-                    tasks.append(hive_visual_async(session, vfile))
-
-                if post['photo'] is not None and post['photo'].get('file', None) is not None:
-                    pfile = post['photo']['file']
-                    # Bild aus Datei in ein Objekt laden
-                    with open(pfile, 'rb') as f:
-                        image_data = base64.b64encode(f.read()).decode('utf-8')
-                    tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
-                    tasks.append(aiornot_async(pfile, is_image = True))
-                    tasks.append(hive_visual_async(session, pfile))
-
-                if post['voice'] is not None and post['voice'].get('file', None) is not None:
-                    ofile = post['voice']['file']
-                    afile = convert_ogg_to_mp3(ofile)
-                    tasks.append(describe_async(afile))
-                    tasks.append(aiornot_async(afile, is_image = False))
-
-                if post['sticker'] is not None and post['sticker'].get('file') is not None:  
-                    sfile = post['sticker']['file'] 
-                    with open(sfile, 'rb') as f:
-                        image_data = base64.b64encode(f.read()).decode('utf-8')          
-                    tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
-                    tasks.append(aiornot_async(sfile, is_image = True))
-                    tasks.append(hive_visual_async(session, pfile))
-
-            if post['text'] is not None and check_texts:
+                tasks.extend(await process_media(session, post))
+            if check_texts and post.get('text'):
                 tasks.append(detectora_async(post['text']))
 
-    results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
 
-        # Assign results back to posts
-        # Die results stehen in der Reihenfolge, in der die Tasks generiert wurden, 
-        # wir replizieren also im Prinzip die Schleife von oben. 
-    index = 0
-    for post in posts:
-        if check_images:
-            if post['video'] is not None and post['video'].get('file', None) is not None:
-                post['video']['transcription'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                post['hive_visual_ai'] = results[index+1]
-                index += 3
-
-            if post['photo'] is not None and post['photo'].get('file', None) is not None:
-                post['photo']['description'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                post['hive_visual_ai'] = results[index+1]
-                index += 3
-
-            if post['voice'] is not None and post['voice'].get('file', None) is not None:
-                post['voice']['transcription'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                index += 2
-
-            if post['sticker'] is not None and post['sticker'].get('file', None) is not None:
-                post['sticker']['description'] = results[index]
-                post['aiornot_ai_score'] = results[index+1]
-                post['hive_visual_ai'] = results[index+1]
-                index += 3                
-
-        if post['text'] is not None and check_texts:
-            post['detectora_ai_score'] = results[index]
-            index +=1
+        index = 0
+        for post in posts:
+            if check_images:
+                index = assign_media_results(post, results, index)
+            if check_texts and post.get('text'):
+                post['detectora_ai_score'] = results[index]
+                index += 1
 
     return posts
 
-def tg_evaluate(posts, check_texts = True, check_images = True):
-    return asyncio.run(tg_evaluate_async(posts, check_texts= check_texts, check_images=check_images))
+def tg_evaluate(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
+    return asyncio.run(tg_evaluate_async(posts, check_texts=check_texts, check_images=check_images))
+
+async def process_media(session: aiohttp.ClientSession, post: Dict[str, Any]) -> List[asyncio.Task]:
+    tasks = []
+    media_types = ['video', 'photo', 'voice', 'sticker']
+
+    for media_type in media_types:
+        media = post.get(media_type)
+        if media and media.get('file'):
+            file_path = media['file']
+            if media_type in ['video', 'voice']:
+                tasks.append(transcribe_async(file_path))
+                tasks.append(aiornot_async(convert_mp4_to_mp3(file_path) if media_type == 'video' else file_path, is_image=False))
+            if media_type in ['photo', 'sticker']:
+                with open(file_path, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
+                tasks.append(aiornot_async(file_path, is_image=True))
+        # Problem für die Probephase: 
+        # Hive ist rate-limited - ich kann die Aufrufe nur synchron starten; 
+        # das erledige ich beim Einbauen der Resultate. 
+#            tasks.append(hive_visual_async(session, file_path))
+
+    return tasks
+
+def assign_media_results(post: Dict[str, Any], results: List[Any], index: int) -> int:
+    media_types = [('video', 'transcription'), ('photo', 'description'), ('voice', 'transcription'), ('sticker', 'description')]
+
+    for media_type, result_key in media_types:
+        media = post.get(media_type)
+        if media and media.get('file'):
+            post[media_type][result_key] = results[index]
+            post['aiornot_ai_score'] = results[index + 1]
+            if media_type in ['video', 'photo', 'sticker']:
+                post['hive_visual_ai'] = hive_visual(media.get('file'))
+            index += 2
+
+    return index

@@ -1,17 +1,18 @@
 from .detectora import query_detectora
-# from .aiornot import query_aiornot
-from .transcribe import gpt4_description
+from .transcribe import gpt4_description, transcribe
 import logging
 import asyncio
+import aiohttp
+from aiohttp import FormData
 from concurrent.futures import ThreadPoolExecutor
 import os
 import requests 
+from typing import List, Dict, Any, Optional
 
 # Alternative zu meinen selbst geschriebenen aiornot-Routinen: 
 # https://github.com/aiornotinc/aiornot-python
 # Installieren mit
 #    pip install aiornot
-
 from aiornot import Client, AsyncClient
 
 # Konstante 
@@ -84,6 +85,47 @@ def aiornot_wrapper(content, is_image = True):
     else:
         print("\b,")
         return None
+
+# Das Schlüsselwörtchen async bewirkt, dass die Funktion einen hook zurückgibt und
+# nicht ein Ergebnis. 
+async def aiornot_wrapper_async(content, is_image = True):
+    aiornot_client = AsyncClient()
+    is_url = (content.startswith("http://") or content.startswith("https://"))
+    if is_image:
+        try:
+            if is_url: 
+                response = await aiornot_client.image_report_by_url(content)
+            else: 
+                response = await aiornot_client.image_report_by_file(content)
+        except Exception as e: 
+            logging.error(f"AIORNOT-Image-API-Fehler: {e}")
+            return None
+    else: 
+        # Achtung: DERZEIT (13.1.25) verarbeitet die Audio-API nur MP3-Dateien, keine MP4/M4A.
+        # Und Ogg schon gleich zweimal nicht. 
+        # Sie gibt auch noch keinen Confidence-Wert zurück, anders als dokumentiert.
+        try:
+            if is_url:
+                response = await aiornot_client.audio_report_by_url(content)
+            else:
+                response = await aiornot_client.audio_report_by_file(content)        
+        except Exception as e:
+            logging.error(f"AIORNOT-Audio-API-Fehler: {e}")
+            return None           
+    # Beschreibung: https://docs.aiornot.com/#5b3de85d-d3eb-4ad1-a191-54988f56d978   
+    if response is not None:  
+        aiornot_dict = ({
+            'score': response.report.verdict,
+            # Unterscheidung: Bilder haben den Confidence score im Unter-Key 'ai'
+            # Audios SOLLTEN eien Confidence-Wert in response.report.confidence haben, haben es aber nicht
+            'confidence': response.report.ai.confidence if hasattr(response.report, 'ai') else 1.01,
+            'generator': object_to_dict(response.report.generator) if hasattr(response.report, 'generator') else None,
+        })
+        print(f"\b{'X' if aiornot_dict['score'] != 'human' else '.'}",end="")
+        return aiornot_dict
+    else:
+        print("\b,")
+        return None
         
 def bsky_aiornot_wrapper(did,embed):
     # Verpackung für die AIORNOT-Funktion: 
@@ -124,10 +166,7 @@ async def transcribe_async(file):
 # Das ist im Augenblick ein wenig geschummelt; es gibt ja eine asynchrone AIORNOT-Routine. 
 # Die baue ich im nächsten Schritt ein. 
 async def aiornot_async(file, is_image=True):
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor() as pool:
-        result = await loop.run_in_executor(pool, aiornot_wrapper, file, is_image)
-    return result
+    return await aiornot_wrapper_async(file, is_image)
 
 # Wrapper für Detectora-Check
 # Auch hier könnte man unter der Oberfläche einen parallelisierbaren API-Aufruf bauen. 
@@ -165,56 +204,55 @@ def hive_visual(content):
         files = {'image': binary}
         response = requests.post(url, headers=headers, files=files)
         response = response.json()
-        scores = response.output.classes
-        score = {'models': []}
-        max = 0
-        for s in scores: 
-            if s['class'] == 'ai_generated':
-                score['ai_score'] = s['score']
-            else:
-                score['models'].append(s)
-                if s['score'] > max:
-                    max = s['score']
-                    score['most_likely_model'] = s['class']
-        return score
+    # Mit der Antwort weiter.
+    return evaluate_hive_visual(response)
+    
+def evaluate_hive_visual(response):
+        # Die ist mal ausnahmsweise kein Objekt, sondern ein dict...
+    # ...das eine Liste enthält, von denen jedes ein dict ist...
+    #... die in eine Liste verpackt sind... MÄÄN!
+    if 'return_code' in response and response['return_code'] == 429:
+        logging.error("Hive Visual Detection: Rate Limit erreicht")
+        return None
+    scores = response['status'][0]['response']['output'][0]['classes']
+    score = {'models': []}
+    max = 0
+    for s in scores: 
+        if s['class'] == 'ai_generated':
+            score['ai_score'] = s['score']
+        elif s['class'] == 'not_ai_generated':
+            max = max 
+        else:
+            score['models'].append(s)
+            if s['score'] > max:
+                max = s['score']
+                score['most_likely_model'] = s['class']
+    return score
+
 
 # Hive-Check Visual Content
 # Parallelisiert
-async def hive_visual_async(session, content):
+async def hive_visual_async(session: aiohttp.ClientSession, content: str):
     url = 'https://api.thehive.ai/api/v2/task/sync'
     api_key = os.environ.get('HIVE_VISUAL_API_KEY')
-    if api_key is None or api_key == "":
-        logging.error("Kein API-Key für Hive Visual Detection")
+    if not api_key:
+        logging.error("No API key for Hive Visual Detection")
         return None
+
     headers = {'Authorization': f"Token {api_key}"}
-    if content.startswith("http://") or content.startswith("https://"):
-        data = {'url': content}
-        async with session.post(url, headers=headers, data=data) as response:
-            response = await response.json()
-            return response
-    # Datei als Input
-    else:
-        try: 
-            binary = open('content', 'rb')
+    data = {'url': content} if content.startswith(("http://", "https://")) else None
+    form_data = None
+
+    if not data:
+        try:
+            form_data = FormData()
+            form_data.add_field('image', open(content, 'rb'))
         except FileNotFoundError:
-            logging.error(f"Datei {content} nicht gefunden")
+            logging.error(f"Hive-Call: File {content} not found")
             return None
-        files = {'image': binary}
-        async with session.post(url, headers=headers, files=files, data=data) as response:
-            response = await response.json()
-            # Eine List of dicts zurückgeben, die so aufgebaut ist: 
-            # [{'class': class, 'score': confidence}, ...]
-            # Die erste ist: {'class': 'ai_generated', 'score': score}
-            scores = response.output.classes
-            score = {'models': []}
-            max = 0
-            for s in scores: 
-                if s['class'] == 'ai_generated':
-                    score['ai_score'] = s['score']
-                else:
-                    score['models'].append(s)
-                    if s['score'] > max:
-                        max = s['score']
-                        score['most_likely_model'] = s['class']
-            return score
-    return None    
+
+    async with session.post(url, headers=headers, data=form_data if form_data else data) as response:
+        await asyncio.sleep(1)  # Rate Limiting 1 Request per Second
+        response_data = await response.json()
+
+    return evaluate_hive_visual(response_data)

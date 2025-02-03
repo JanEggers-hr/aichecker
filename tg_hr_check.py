@@ -1,6 +1,6 @@
 from src.aichecker.check_tg import *
 from src.aichecker.detectora import query_detectora
-from src.aichecker.aiornot import query_aiornot
+from aichecker.je_aiornot import query_aiornot
 from src.aichecker.transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
 from ast import literal_eval
 import re

@@ -1,8 +1,6 @@
 from src.aichecker.check_ig import *
 from src.aichecker.detectora import query_detectora
-from src.aichecker.aiornot import query_aiornot
 from src.aichecker.transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
-from ast import literal_eval
 
 # KONSTANTEN
 N = 10
@@ -11,25 +9,7 @@ AIORNOT_T = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.
 TEST = False
 
 
-# Hilfsfunktion: CSV einlesen und als df ausgeben
-def convert_to_obj(val):
-    if pd.isna(val):
-        return None
-    try:
-        return literal_eval(val)
-    except (ValueError, SyntaxError):
-        return val
 
-
-def reimport_csv(fname):
-    df = pd.read_csv(fname)
-    # Diese Spalten sind dict:
-    structured_columns = ['photo', 'video']
-    for c in structured_columns:
-        df[c] = df[c].apply(convert_to_obj)
-    # AIORNOT-Bewertung sind dict 
-    df['aiornot_ai_score'] = df['aiornot_ai_score'].apply(convert_to_obj)
-    return df
 
 if __name__ == "__main__":
     # ig_check
@@ -40,30 +20,30 @@ if __name__ == "__main__":
     if profile is None:
             print("Kein Konto mit diesem Namen gefunden.")
             exit()
-    last_post = profile['media_count']
     print(f"Analysiert wird: {profile['full_name']}")
     print(f"{profile['biography']}")
     print()
+    print(f"Folgt: {profile['following_count']}")
     print(f"Follower: {profile['follower_count']}")
     print(f"Posts: {profile['media_count']}")
+    print(f"Angelegt: {profile['created']}")
     
     if not os.path.exists('ig-checks'):
         os.makedirs('ig-checks')
     filename = f'ig-checks/{handle}.csv'
     if os.path.exists(filename):
-        existing_df = retrieve_ig_csv(handle)
-        start_post = max(existing_df['nr'])
-        print(f"Dieser Kanal wurde schon einmal ausgelesen.")
+        existing_df = ig_reimport_csv(handle)
+        last_post = max(existing_df['timestamp'])
+        print(f"Dieser Kanal wurde schon einmal ausgelesen, zuletzt: {last_post}")
     else: 
-        start_post = last_post-N+1
-        print(f"Noch nicht gespeichert. Importiere {N} Posts bis zum letzten: {last_post}.")        
+        print(f"Noch nicht gespeichert. Importiere die aktuellsten {N} Posts.")        
     # Lies die aktuellsten Posts, sichere und analysiere sie
     #
     print("Einlesen: ", end="")
     posts = igc_read_posts(handle, n=N)
     print() # für die Fortschrittsmeldung
     print("Inhalte sichern und mit KI beschreiben: ", end="")
-    hydrated_posts = ig_hydrate(posts)
+    hydrated_posts = ig_hydrate(posts,mdir = "ig-checks/media")
     print()
     print("Auf KI-Inhalt prüfen: ",end="")
     # Bearbeitet nur die Posts, für die Inhalte hinterlegt sind
