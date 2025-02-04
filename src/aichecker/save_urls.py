@@ -8,11 +8,12 @@ import aiofiles
 
 ## Abspeichern in Dateien
 
-def save_url(fname, name, mdir):
+def save_url(fname, name, mdir = ""):
     # Die Medien-URLs bekommen oft einen Parameter mit übergeben; deswegen nicht nur
     # "irgendwas.ogg" berücksichtigen, sondern auch "irgendwas.mp4?nochirgendwas"
-#    mdir = os.path.dirname(os.path.abspath(__file__)) + '/../media'
-    mdir = "./media"
+    if mdir == "":
+        mdir = os.path.dirname(os.path.abspath(__file__)) + '/../media'
+    
     content_ext = re.search(r"\.[a-zA-Z0-9]+(?=\?|$)",fname).group(0)
     content_file = f"{mdir}/{name}{content_ext}"
     try:
