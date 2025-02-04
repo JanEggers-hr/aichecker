@@ -165,8 +165,10 @@ async def transcribe_async(file):
 # Wrapper für AIORNOT-Check
 # Das ist im Augenblick ein wenig geschummelt; es gibt ja eine asynchrone AIORNOT-Routine. 
 # Die wirft aber Fehler. 
-async def aiornot_async(file, is_image=True):
-    return await aiornot_wrapper_async(file, is_image)
+async def aiornot_async(content, is_image=True):
+    if content is None:
+        return None
+    return await aiornot_wrapper_async(content, is_image)
 
 # Wrapper für Detectora-Check
 # Auch hier könnte man unter der Oberfläche einen parallelisierbaren API-Aufruf bauen. 

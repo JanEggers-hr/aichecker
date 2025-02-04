@@ -427,8 +427,8 @@ def igc_read_stories(cname, save=False, describe=False):
             'timestamp': datetime.fromtimestamp(post['taken_at']).isoformat(), # Highlights haben nur ein Unix-TS in created_at
             'text': post.get('caption',''),
             'type': 'story ',
-            'hashtags': None,
-            'mentions': None,
+            'hashtags': [],
+            'mentions': [],
             'location': None,
         }
         # Mentions im Key: reel_mentions (haben nur Videos?)
@@ -505,12 +505,12 @@ def igc_read_highlights(cname, save=False, describe=False):
             print(".",end="")
             timestamp = datetime.fromtimestamp(post['taken_at']).isoformat()
             parsed_post = {
-                'id': h['id'],
+                'id': id,
                 'timestamp': timestamp, 
                 'text': title,
                 'type': 'highlight',
-                'hashtags': None,
-                'mentions': None,
+                'hashtags': [],
+                'mentions': [],
                 'location': None, 
             }
             # Mentions im Key: reel_mentions (haben nur Videos?)
