@@ -623,8 +623,8 @@ async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = Tru
                     
                     # Hive Visual AI kann leider nicht asynchron abgefragt werden,
                     # deshalb synchron und hoffentlich parallel zu den Transkriptionen und AiOrnot-Anfragen
-            if check_texts and post.get('text'):
-                tasks.append(detectora_async(post['text']))
+            if check_texts:
+                tasks.append(detectora_async(post.get('text','')))
 
         results = await asyncio.gather(*tasks)
 
@@ -650,7 +650,7 @@ async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = Tru
                         hive_max = hive.get('ai_score',0)
                 post['aiornot_ai_max_score'] = aiornot_max
                 post['hive_visual_ai_max_score'] = hive_max
-            if check_texts and post.get('text'):
+            if check_texts:
                 post['detectora_ai_score'] = results[index]
                 index += 1
 # Eingerückt für die ausgeklammerte with session Anweisung oben
