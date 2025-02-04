@@ -439,7 +439,7 @@ def igc_read_stories(cname, save=False, describe=False):
         elif 'image_versions' in post:
             image = post['image_versions'].get('items',[])[1]
             if image is not None:
-                parsed_post['images'] = [{'type': 'image', 'url': image.get('url')}]
+                parsed_post['media'] = [{'type': 'image', 'url': image.get('url')}]
             # Mentions im Key: 
         parsed_posts.append(parsed_post)
     return parsed_posts
@@ -521,7 +521,7 @@ def igc_read_highlights(cname, save=False, describe=False):
             elif 'image_versions' in post:
                 image = post['image_versions'].get('items',[])[1]
                 if image is not None:
-                    parsed_post['images'] = [{'type': 'image', 'url': image.get('url')}]
+                    parsed_post['media'] = [{'type': 'image', 'url': image.get('url')}]
                 # Mentions im Key: 
             parsed_posts.append(parsed_post)
     return parsed_posts
