@@ -12,13 +12,14 @@ TEST = False
 if __name__ == "__main__":
     logging.basicConfig(filename='logfile.log', level=logging.DEBUG)
     # ig_check
-    handle_str = input("Handle des Kanals eingeben: ")
     #handle_str = "telegram"
-    handle = igc_clean(handle_str)
-    profile = igc_profile(handle)
-    if profile is None:
+    profile = None
+    while profile is None: 
+        handle_str = input("Handle des Kanals eingeben: ")
+        handle = igc_clean(handle_str)
+        profile = igc_profile(handle)
+        if profile is None:
             print("Kein Konto mit diesem Namen gefunden.")
-            exit()
     print(f"Analysiert wird: {profile['full_name']}")
     print(f"{profile['biography']}")
     print()
@@ -48,6 +49,23 @@ if __name__ == "__main__":
     # Bearbeitet nur die Posts, für die Inhalte hinterlegt sind
     checked_posts = ig_evaluate(hydrated_posts)
     #
+    print(f"Lese die Insta-Stories auf {handle}...")
+    stories = igc_read_stories(handle)
+    print(f"{len(stories)} Stories gefunden.")
+    print(f"Lese die Highlight-Stories...")
+    highlights = igc_read_highlights(handle)
+    print(f"{len(highlights)} Stories gefunden.")
+    ephemeral = stories + highlights
+    print(f"{len(ephemeral)} ephemere Inhalte sichern und mit KI beschreiben: ", end="")  
+    hydrated_ephemeral = ig_hydrate(ephemeral,mdir = "ig-checks/media")
+    print()
+    print("Auf KI-Inhalt prüfen: ",end="")
+    checked_ephemeral = ig_evaluate(hydrated_ephemeral)
+    # Zusammenfassung der Ergebnisse    
+    checked_posts.extend(checked_ephemeral)
+    n_posts = len(checked_posts)
+    print(f"{n_posts} Posts und ephemere Inhalte geprüft.")
+    # Zählen der Inhalte nach Typ und KI-Status
     n_images = 0
     n_ai_images = 0
     n_texts = 0

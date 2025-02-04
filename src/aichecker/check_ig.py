@@ -117,14 +117,14 @@ def igc_clean(cname):
     
     # Regex-Muster definieren
     patterns = [
-        r"(?<=instagram\.com/)[a-zäöüß0-9_]+",
-        r"(?<=www\.instagram\.com/)[a-zäöüß0-9_]+",
-        r"(?<=http://instagram\.com/)[a-zäöüß0-9_]+",
-        r"(?<=https://instagram\.com/)[a-zäöüß0-9_]+",
-        r"(?<=http://www\.instagram\.com/)[a-zäöüß0-9_]+",
-        r"(?<=https://www\.instagram\.com/)[a-zäöüß0-9_]+",
-        r"(?<=@)[a-zäöüß0-9_]+",
-        r"^[a-zäöüß0-9_]+$"
+        r"(?<=instagram\.com/)[a-zäöüß0-9_\.]+",
+        r"(?<=www\.instagram\.com/)[a-zäöüß0-9_\.]+",
+        r"(?<=http://instagram\.com/)[a-zäöüß0-9_\.]+",
+        r"(?<=https://instagram\.com/)[a-zäöüß0-9_\.]+",
+        r"(?<=http://www\.instagram\.com/)[a-zäöüß0-9_\.]+",
+        r"(?<=https://www\.instagram\.com/)[a-zäöüß0-9_\.]+",
+        r"(?<=@)[a-zäöüß0-9_\.]+",
+        r"^[a-zäöüß0-9_\.]+$"
     ]
     
     for pattern in patterns:
@@ -309,7 +309,11 @@ def igc_read_posts_until(cname, cutoff="1970-01-01T00:00:00", save=False, descri
             return None
         
         # Frühesten gelesenen Zeitstempel ermitteln
-        min_ts = min(d['taken_at_timestamp'] for d in data['data']['items'])
+        try:
+            min_ts = min(d['taken_at_timestamp'] for d in data['data']['items'])
+        except ValueError as e:
+            logging.error(f"Instagram-API-Fehler: Keine Daten? {e}")
+            logging.error(f"data['data']['items']")
         if min_ts <= cutoff:
             read_on = False
             new_posts = [d for d in data['data']['items'] if d['taken_at_timestamp'] > cutoff]
@@ -359,7 +363,12 @@ def igc_read_posts(cname, n=12, save=False, describe=False):
             e = data.get('detail')
             print(f"Instagram-API-Fehler: {e}")
             logging.error(f"Instagram-API-Fehler: {e}")
-            return None
+            return []
+        if 'message' in data:
+            e = data.get('message')
+            print(f"Instagram-API-Fehler: {e}")
+            logging.error(f"Instagram-API-Fehler: {e}")
+            return []
 
         posts.extend(data['data']['items'])
         pagination_token = data.get('pagination', "")
@@ -373,8 +382,8 @@ def igc_read_posts(cname, n=12, save=False, describe=False):
 
 def igc_read_stories(cname, save=False, describe=False):
     """ Liest die sichtbaren Stories aus. Zwingt sie in die gleiche Logik wie Posts. 
-    D.h.: Videos werden unter "videos" als einziger Eintrag in einer Liste gespeichert,
-    Images  
+    Stories kriegen den Typ 'story'
+    D.h.: Videos und Images werden unter "media" als einziger Eintrag in einer Liste gespeichert.
     
     Args:
         cname (str): der Name des Profils
@@ -390,9 +399,20 @@ def igc_read_stories(cname, save=False, describe=False):
         'x-rapidapi-host': "instagram-scraper-api2.p.rapidapi.com"
     }
 
-    conn.request("GET", f"/v1.2/stories?username_or_id_or_url={cname}", headers=headers)
+    conn.request("GET", f"/v1/stories?username_or_id_or_url={cname}", headers=headers)
     res = conn.getresponse()
     data = json.loads(res.read().decode("utf-8"))
+    # Fehler werden als Key "detail" zurückgegeben
+    if 'detail' in data:
+        e = data.get('detail')
+        print(f"Instagram-API-Fehler Stories: {e}")
+        logging.error(f"Instagram-API-Fehler Stories: {e}")
+        return []
+    if 'message' in data:
+        e = data.get('message')
+        print(f"Instagram-API-Message Stories: {e}")
+        logging.error(f"Instagram-API-Message Stories: {e}")
+        return []
 
     posts = data['data']['items']
     parsed_posts =[]
@@ -401,26 +421,109 @@ def igc_read_stories(cname, save=False, describe=False):
     # - Bilder-Stories: Eine Liste von Bild-Urls in 
     # - Video-Stories: URL des Videos in ['video_url']
     for post in posts:
+        print(".",end="")
         parsed_post = {
-            'id': post['code'],
-            'timestamp': post['taken_at_date'], # Highlights haben nur ein Unix-TS in created_at
-            'caption': post['caption'],
+            'id': post['id'],
+            'timestamp': datetime.fromtimestamp(post['taken_at']).isoformat(), # Highlights haben nur ein Unix-TS in created_at
+            'text': post.get('caption',''),
+            'type': 'story ',
             'hashtags': None,
             'mentions': None,
-            'location': None, 
+            'location': None,
         }
-        # Mentions im Key: reel_mentions
+        # Mentions im Key: reel_mentions (haben nur Videos?)
         mentions_raw = post.get('reel_mentions',[])
         parsed_post['mentions'] = [{'username': mention['user']['username']} for mention in mentions_raw]
         if 'video_url' in post:
-            parsed_post['videos'] = [{'url': post['video_url']}]
-        else:
-            images = []
-            for image in post['image_versions'].get('items',[]):
-                images.append({'url': image['url']})
-            parsed_post['images'] = images
+            parsed_post['media'] = [{'type': 'video', 'url': post['video_url']}]
+        elif 'image_versions' in post:
+            image = post['image_versions'].get('items',[])[1]
+            if image is not None:
+                parsed_post['images'] = [{'type': 'image', 'url': image.get('url')}]
             # Mentions im Key: 
         parsed_posts.append(parsed_post)
+    return parsed_posts
+
+
+def igc_read_highlights(cname, save=False, describe=False):
+    """ Liest die sichtbaren Highlights aus (die Stories, die im Profil angepinnt sind). 
+    Zwingt sie in die gleiche Logik wie Posts. Highlights kriegen den Typ 'highlight' 
+    D.h.: Videos und Images werden unter "media" als einziger Eintrag in einer Liste gespeichert.
+    
+    ANSCHEINEND ENTHALTEN HIGHLIGHTS ABER SELBER KEINE MEDIEN
+    
+    Args:
+        cname (str): der Name des Profils
+        save (bool): ob die Medien gespeichert werden sollen
+        describe (bool): ob die Medien beschrieben werden sollen
+
+    Ausgabe: siehe oben igc_parse_posts
+    """
+    
+    conn = http.client.HTTPSConnection("instagram-scraper-api2.p.rapidapi.com")
+    headers = {
+        'x-rapidapi-key': os.getenv('RAPIDAPI_KEY'),
+        'x-rapidapi-host': "instagram-scraper-api2.p.rapidapi.com"
+    }
+
+    conn.request("GET", f"/v1/highlights?username_or_id_or_url={cname}", headers=headers)
+    res = conn.getresponse()
+    data = json.loads(res.read().decode("utf-8"))
+    # Fehler werden als Key "detail" zurückgegeben
+    if 'detail' in data:
+        e = data.get('detail')
+        print(f"Instagram-API-Fehler Highlights: {e}")
+        logging.error(f"Instagram-API-Fehler Highlights: {e}")
+        return []
+    if 'message' in data:
+        e = data.get('message')
+        print(f"Instagram-API-Message Highlights: {e}")
+        logging.error(f"Instagram-API-Message Stories: {e}")
+        return []
+
+    highlights = data['data']['items']
+    parsed_posts =[]
+    
+    # Highlights parsen: (Wissensstand: 3.2.2025)
+    # Erst mal die Infos abrufen, um sie herunterladen zu können. 
+    # Sind im Prinzip wie Stories, heißen aber anders. 
+    for h in highlights:
+        # Erst mal die Info über einen weiteren API-Call holen
+        id = h['id'].split(':')[-1]
+        title = h['title']
+        conn.request("GET", f"/v1/highlight_info?highlight_id={id}", headers=headers)
+        res = conn.getresponse()
+        data = json.loads(res.read().decode("utf-8"))
+        try:
+            posts = data['data']['items']
+        except KeyError as e:
+            logging.error(f"Instagram-API-Message Stories: {e}")
+            return []    
+        # Fehler werden als Key "detail" zurückgegeben
+        for post in posts:
+            # timestamp
+            print(".",end="")
+            timestamp = datetime.fromtimestamp(post['taken_at']).isoformat()
+            parsed_post = {
+                'id': h['id'],
+                'timestamp': timestamp, 
+                'text': title,
+                'type': 'highlight',
+                'hashtags': None,
+                'mentions': None,
+                'location': None, 
+            }
+            # Mentions im Key: reel_mentions (haben nur Videos?)
+            mentions_raw = post.get('reel_mentions',[])
+            parsed_post['mentions'] = [{'username': mention['user']['username']} for mention in mentions_raw]
+            if 'video_url' in post:
+                parsed_post['media'] = [{'type': 'video', 'url': post['video_url']}]
+            elif 'image_versions' in post:
+                image = post['image_versions'].get('items',[])[1]
+                if image is not None:
+                    parsed_post['images'] = [{'type': 'image', 'url': image.get('url')}]
+                # Mentions im Key: 
+            parsed_posts.append(parsed_post)
     return parsed_posts
 
 ########################################
@@ -493,12 +596,12 @@ async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = Tru
     async with aiohttp.ClientSession() as session:
 # war mal für das asynchrone Auslesen der Hive-API, aber das geht nicht - siehe unten
         tasks = []
-        # Semaphore to keep it to 1 call at a time
-        semaphore = asyncio.Semaphore(1)
+        # Semaphore to keep it to 3 calls at a time
+        semaphore = asyncio.Semaphore(2)
         async def hive_visual_with_delay(file_path, semaphore):
-#            async with semaphore:
+            async with semaphore:
                 result = await hive_visual_async(session,file_path)
-                await asyncio.sleep(1.1)  # Rate limit delay
+                await asyncio.sleep(.6)  # Rate limit delay
                 return result
          
         for post in posts:
@@ -607,6 +710,6 @@ def ig_append_csv(handle, posts_list, path = "ig-checks"):
         existing_df = pd.DataFrame()
     df = pd.DataFrame(posts_list)
     if existing_df is not None: 
-        df = pd.concat([existing_df, df]).drop_duplicates(subset=['uri']).reset_index(drop=True)
+        df = pd.concat([existing_df, df]).drop_duplicates(subset=['timestamp']).reset_index(drop=True)
     df.to_csv(filename, index=False)
 
