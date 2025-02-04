@@ -177,7 +177,7 @@ def ig_post_parse(instagram_data, save=False, describe=False):
     for item in instagram_data:
         query_ts = datetime.now().isoformat()
         # Extract post details
-        post_code = item.get('id', None)
+        post_code = str(item.get('id', None))
         timestamp = datetime.fromtimestamp(item.get('taken_at_ts', 0)).isoformat()
         caption = item.get('caption', {}).get('text', None)
         hashtags = item.get('caption', {}).get('hashtags', [])
@@ -592,7 +592,7 @@ def convert_to_obj(val):
 def ig_reimport_csv(fname):
     df = pd.read_csv(fname)
     # Diese Spalten sind dict:
-    structured_columns = ['videos', 'images', 'aiornot_ai_score', 'hive_visual_ai']
+    structured_columns = ['hashtags','mentions','media']
     for c in structured_columns:
         if c in df.columns:
             df[c] = df[c].apply(convert_to_obj)
