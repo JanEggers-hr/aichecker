@@ -1,6 +1,4 @@
 from src.aichecker.check_tg import *
-from src.aichecker.detectora import query_detectora
-from aichecker.je_aiornot import query_aiornot
 from src.aichecker.transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
 from ast import literal_eval
 
@@ -20,16 +18,6 @@ def convert_to_obj(val):
     except (ValueError, SyntaxError):
         return val
 
-
-def reimport_csv(fname):
-    df = pd.read_csv(fname)
-    # Diese Spalten sind dict:
-    structured_columns = ['photo', 'sticker', 'video', 'voice', 'forwards', 'links']
-    for c in structured_columns:
-        df[c] = df[c].apply(convert_to_obj)
-    # AIORNOT-Bewertung sind dict 
-    df['aiornot_ai_score'] = df['aiornot_ai_score'].apply(convert_to_obj)
-    return df
 
 if __name__ == "__main__":
     # tg_check
@@ -55,8 +43,8 @@ if __name__ == "__main__":
         os.makedirs('tg-checks')
     filename = f'tg-checks/{handle}.csv'
     if os.path.exists(filename):
-        existing_df = reimport_csv(filename)
-        start_post = max(existing_df['nr'])
+        existing_df = tg_reimport_csv(filename)
+        start_post = max(existing_df['id'])
         print(f"Dieser Kanal wurde schon einmal ausgelesen, zuletzt Post Nr.: {start_post} - seitdem {last_post-start_post} neue Posts")
     else: 
         start_post = last_post-N+1

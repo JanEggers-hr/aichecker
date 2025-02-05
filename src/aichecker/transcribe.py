@@ -105,8 +105,11 @@ def convert_ogg_to_m4a(input_file):
 def convert_ogg_to_mp3(input_file):
     # Load the OGG file
     try:
+        output_file = os.path.splitext(input_file)[0]+".mp3"
+        if os.path.exists(output_file):
+            return output_file
         audio = AudioSegment.from_ogg(input_file)
-        # Export the audio to an M4A file
+        # Export the audio to an MP3 file
         output_file = os.path.splitext(input_file)[0]+".mp3"
         audio.export(output_file, format="mp3")
         return output_file

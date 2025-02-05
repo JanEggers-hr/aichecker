@@ -21,10 +21,13 @@ import logging
 from .transcribe import convert_mp4_to_mp3, convert_ogg_to_mp3
 from .check_wrappers import describe_async, transcribe_async, detectora_async, aiornot_async, hive_visual
 from .save_urls import save_url_async
+from .evaluate import evaluate_async
+from .hydrate import hydrate_async
 import aiohttp
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional
+import ast
 
 def extract_k(n_str: str):
     try: 
@@ -53,7 +56,7 @@ def tgc_profile(channel="telegram"):
     - 'n_posts' (number of the last published post)
     - 'created' (wann angelegt)
 
-    Example: 
+    Example:
     profile = tgc_profile("wilhelmkachel")
     profile = tgc_profile("asdfasdfasdf") #  returns None
     """
@@ -147,11 +150,11 @@ def get_channel_from_url(channel:str):
     return re.search(r"(?<=t\.me\/).+(?=\/[0-9])",channel).group(0)
 
 def tg_post_parse(b):
-    # Liest aus dem HTML-Code eines einzelnen 
+    # Liest aus dem HTML-Code eines einzelnen Posts
     # Immer vorhanden: 
     # Postnummer, Zeitstempel (auch wenn er in Einzel-Posts als datetime auftaucht und in Channel_seiten als time)
-    b_nr = int(re.search(r'[0-9]+$', b.select_one("a.tgme_widget_message_date")['href']).group())
-    logging.info(f"Parse Telegram-Post Nr. {b_nr}")
+    b_id = int(re.search(r'[0-9]+$', b.select_one("a.tgme_widget_message_date")['href']).group())
+    logging.info(f"Parse Telegram-Post Nr. {b_id}")
     if b.select_one("time.time") is not None:
         timestamp = isoparse(b.select_one("time.time")['datetime']).isoformat()
     else: # Einzel-Post
@@ -173,63 +176,70 @@ def tg_post_parse(b):
     # Text
     if b.select_one("div.tgme_widget_message_text") is not None:
         text = b.select_one("div.tgme_widget_message_text").get_text()
+        type = 'text'
     # Polls: Text der Optionen extrahieren
     elif b.select_one("div.tgme_widget_message_poll") is not None:
         text = b.select_one("div.tgme_widget_message_poll_question").get_text()
         for bb in b.select("div.tgme_widget_message_poll_option_text"):
             text += "\n* " + bb.get_text() 
+        type = 'poll'
     else:
         text = None
+
+    # Jetzt die Medien. 
+    media = []
+    
     # Sticker (Beispiel: https://t.me/telegram/23)
     if b.select_one("div.tgme_widget_message_sticker_wrap") is not None:
         sticker_url = b.select_one("i.tgme_widget_message_sticker")['data-webp']
-        sticker = {'url': sticker_url,
+        media.append({
+            'type': 'image',
+            'url': sticker_url,
                     # 'image': base64.b64encode(requests.get(sticker_url).content).decode('utf-8')
-                    }
-    else:
-        sticker = None
+            })
+        type = 'sticker'
 
     # Photo URL
     if b.select_one("a.tgme_widget_message_photo_wrap") is not None:
         photo_url = re.search(r"(?<=image\:url\(\').+(?=\')", b.select_one("a.tgme_widget_message_photo_wrap")['style']).group(0)
-        photo = {'url': photo_url,
+        media.append({'type': 'image',
+                      'url': photo_url,
                     # 'image': base64.b64encode(requests.get(photo_url).content).decode('utf-8')
-                    }
-    else:
-        photo = None
+                    })
+        type = 'photo'
+
     # Sprachnachricht tgme_widget_message_voice https://t.me/fragunsdochDasOriginal/27176
     if b.select_one('audio.tgme_widget_message_voice') is not None:
         # Link auf OGG-Datei
         voice_url = b.select_one('audio.tgme_widget_message_voice')['src']
         voice_duration = b.select_one('time.tgme_widget_message_voice_duration').get_text()
-        voice = {
+        media.append({
+            'type': 'voice',
             'url': voice_url,
             'duration': voice_duration,
-        }
+        })
         # Für Transkription immer lokale Kopie anlegen
-        
-    else:
-        voice = None
+        type = 'voice'
+
     # Video URL (Beispiel: https://t.me/telegram/46)
     # Wenn ein Thumbnail/Startbild verfügbar ist - das ist leider nur bei den
     # Channel-Seiten, nicht bei den Einzel-Post-Seiten der Fall - speichere
     # es ab wie ein Photo. 
     if b.select_one('video.tgme_widget_message_video') is not None:
         video_url = b.select_one('video.tgme_widget_message_video')['src']
+        media.append({
+            'type': 'video',
+            'url': video_url,
+        })
+        type = 'video'
         if b.select_one('tgme_widget_message_video_thumb') is not None:
             video_thumbnail_url = re.search(r"(?<=image\:url\('\)).+(?=\')",b.select_one('tgme_widget_message_video_thumb')['style'].group(0))
-            video = {'url': video_url,
-                    'thumbnail': video_thumbnail_url,
-            }
-            photo = {
+            media.append({
+                'type': 'image',
                 'url': video_thumbnail_url,
                 # Keine Bas64 aus Übersichtlichkeits-Gründen
                 #'image': base64.b64encode(requests.get(video_thumbnail_url).content).decode('utf-8')
-            }
-        else:
-            video = {'url': video_url,                     }
-    else:
-        video = None
+            })
     # Document / Audio URL? https://t.me/telegram/35
     # Link-Preview: https://t.me/s/telegram/15
     
@@ -248,18 +258,17 @@ def tg_post_parse(b):
     poll_type = b.select_one("div.tgme_widget_message_poll_type")
     if poll_type is not None:
         poll_type = poll_type.get_text() # None wenn nicht vorhanden
+    
     post_dict = {
         'channel': channel,
-        'nr': b_nr,
+        'id': b_id,
         'url': post_url,
         'views': views, #  Momentaufnahme! Views zum Zeitpunkt views_ts
         'views_ts': datetime.now().isoformat(), # Zeitstempel für die Views
         'timedate': timestamp,
         'text': text,
-        'photo': photo,
-        'sticker': sticker,
-        'video': video,
-        'voice': voice,
+        'type': type,
+        'media': media,
         'forwards': forward,
         'poll': poll_type, 
         'links': links,
@@ -267,10 +276,10 @@ def tg_post_parse(b):
     }
     return post_dict
 
-def tgc_read(cname, nr):
+def tgc_read(cname, id):
     # Einzelnen Post lesen: URL erzeugen, aufrufen. 
     c = tgc_clean(cname)
-    channel_url = f"https://t.me/{c}/{nr}"
+    channel_url = f"https://t.me/{c}/{id}"
     return tgc_read_url(channel_url)
 
 def tgc_read_url(channel_url):
@@ -289,15 +298,15 @@ def tgc_read_url(channel_url):
     b = tgm.select_one("div.tgme_widget_message")
     return tg_post_parse(b)
 
-def tgc_blockread(cname="telegram", nr=None):
+def tgc_blockread(cname="telegram", id=None):
     """
     Reads a block of posts from the channel - normally 16 are displayed.
-    If single parameter is set, read only the post nr; return empty if it 
+    If single parameter is set, read only the post id; return empty if it 
     does not exist. 
 
     Parameters:
     cname (str): Channel name as a string (non-name characters are stripped).
-    nr (int, optional): Number where the block is centered. If none is given, read last post.
+    id (int, optional): Number where the block is centered. If none is given, read last post.
     save (bool, default True): Saves images to an image folder.
     describe (bool, default True): Transcribes/describes media content
     single (bool, default False): Return a single post rather than up to 16
@@ -305,16 +314,16 @@ def tgc_blockread(cname="telegram", nr=None):
     Returns:
     list of dict: A list of dictionaries consisting of up to 16 posts.
     """
-    if nr is None:
-        nr = "" # Without a number, the most recent page/post is shown
+    if id is None:
+        id = "" # Without a number, the most recent page/post is shown
     else:
-        nr = int(nr)
+        id = int(id)
 
     c = tgc_clean(cname)
-    # Nur einen Post holen? Dann t.me/<channel>/<nr>,
-    # sonst t.me/s/<channel>/<nr>
-    channel_url = f"https://t.me/s/{c}/{nr}"
-    logging.info(f"Lese Telegram-Channel {c}, Block um den Post {nr}")
+    # Nur einen Post holen? Dann t.me/<channel>/<id>,
+    # sonst t.me/s/<channel>/<id>
+    channel_url = f"https://t.me/s/{c}/{id}"
+    logging.info(f"Lese Telegram-Channel {c}, Block um den Post {id}")
     response = requests.get(channel_url)
     response.raise_for_status()
     tgm = BeautifulSoup(response.content, 'html.parser')
@@ -322,7 +331,7 @@ def tgc_blockread(cname="telegram", nr=None):
     block = tgm.select("div.tgme_widget_message_wrap") 
     posts = [tg_post_parse(b) for b in block]
     # Posts aufsteigend sortieren   
-    posts.sort(key=lambda x: x['nr'])
+    posts.sort(key=lambda x: x['id'])
     return posts
 
 def tgc_read_range(cname, n1=1, n2=None, save=False, describe = False):
@@ -330,24 +339,24 @@ def tgc_read_range(cname, n1=1, n2=None, save=False, describe = False):
     # Zuerst: Nummer des letzten Posts holen
     profile = tgc_profile(cname)
     # Sicherheitscheck: erste Post-Nummer überhaupt schon gepostet?
-    max_nr = profile['n_posts']
-    if n1 > max_nr: 
+    max_id = profile['n_posts']
+    if n1 > max_id: 
         return None
     n = n1
     if n2 is None:
-        n2 = max_nr
+        n2 = max_id
     posts = []
     while n <= n2:
         max = n2
         new_posts = tgc_blockread(cname, n)
         for p in new_posts:
-            if p['nr'] > n2: 
+            if p['id'] > n2: 
                 return posts
-            if p['nr'] >= n:
+            if p['id'] >= n:
                 posts.append(p)
-                if p['nr'] == n2:
+                if p['id'] == n2:
                     return posts
-        n = p['nr']
+        n = p['id']
     return posts
 
 def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
@@ -355,16 +364,16 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
     # Zuerst: Nummer des letzten Posts holen
     profile = tgc_profile(cname)
     # Sicherheitscheck: erste Post-Nummer überhaupt schon gepostet?
-    max_nr = profile['n_posts']
+    max_id = profile['n_posts']
     if cutoff is None: 
-        cutoff = max_nr
-    elif cutoff > max_nr: 
+        cutoff = max_id
+    elif cutoff > max_id: 
         return None
     posts = []
     while len(posts) < n: 
         # Blockread-Routine liest immer ein ganzes Stück der Seite
         new_posts = tgc_blockread(cname, cutoff)
-        nr_values = [post['nr'] for post in new_posts]
+        id_values = [post['id'] for post in new_posts]
         posts.extend(new_posts)  
         # Abbruchbedingung: erster Post erreicht
         if cutoff == 1: 
@@ -372,8 +381,8 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
         cutoff = cutoff - 16
         if cutoff < 1:
             cutoff = 1
-    # Posts aufsteigend sortieren   
-    posts.sort(key=lambda x: x['nr'])
+    # Posts absteigend sortieren
+    posts.sort(key=lambda x: x['id'], reverse=True)
     return posts
 
 ## Routinen zum Check der letzten 20(...) Posts eines Telegram-Channels
@@ -381,91 +390,85 @@ def tgc_read_number(cname, n = 20, cutoff = None, save=True, describe = True):
 #
 # Hinter den Kulissen werden Listen von Post-dicts genutzt
 
-async def tg_hydrate_async(posts, mdir="./media"):
-    # Liest die Files der Videos, Fotos, Voice-Messages asynchron ein. 
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        for post in posts:
-            channel = post['channel']
-            b_nr = post['nr']
-            for k in ['video', 'photo', 'voice', 'sticker']:
-                if post[k] is not None and post[k].get('file', None) is None:
-                    url = post[k]['url']
-                    file = f"{channel}_{b_nr}_{k}"
-                    tasks.append(save_url_async(session, url, file, mdir))
-        results = await asyncio.gather(*tasks)
-
-        # Assign results back to posts
-        index = 0
-        for post in posts:
-            for k in ['video', 'photo', 'voice', 'sticker']:
-                if post[k] is not None and post[k].get('file', None) is None:
-                    post[k]['file'] = results[index]
-                    index += 1
+# Hilfsfunktion: Verwandelt die Telegram-Tabellen mit den Spalten
+# video', 'photo', 'voice', 'sticker'
+# in eine Tabelle mit der Spalte 'media':
+# Liste mit dict-Elementen, jeweils mit 'type' und dann den Inhalten
+def pivot_to_media(posts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for post in posts:
+        if post.get('media'):
+            continue
+        media = []
+        for media_type in ['video', 'photo', 'voice', 'sticker']:
+            if post.get(media_type):
+                media.append({'type': media_type, **post[media_type]})
+                post.pop(media_type)
+                post['type'] = media_type
+        post['media'] = media
     return posts
 
-def tg_hydrate(posts, mdir="./media"):
-    return asyncio.run(tg_hydrate_async(posts, mdir))
-
-# Routine fragt asynchron die APIs von AIORNOT und Hive ab
-# und lässt Audio-Inhalte transkribieren/Bilder beschreiben
-async def tg_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        for post in posts:
-            if check_images:
-                tasks.extend(await process_media(session, post))
-            if check_texts and post.get('text'):
-                tasks.append(detectora_async(post['text']))
-
-        results = await asyncio.gather(*tasks)
-
-        index = 0
-        for post in posts:
-            if check_images:
-                index = assign_media_results(post, results, index)
-            if check_texts and post.get('text'):
-                post['detectora_ai_score'] = results[index]
-                index += 1
-
+# Das Gegenstück: Die Tabelle wieder breit machen
+def pivot_from_media(posts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for post in posts:
+        if not post.get('media'):
+            continue
+        for media in post['media']:
+            type = media['type']
+            # Drop type key from media dict
+            media.pop('type')
+            post[type] = media
     return posts
 
+# Wrapper für die asynchrone Hydrate-Funktion
+def tg_hydrate(posts: List[Dict[str, Any]], mdir = "./media") -> List[Dict[str, Any]]:
+    # In den Telegram-Posts hat bislang dummerweise jeder Medien-Typ seine eigene Spalte.
+    # Diese Logik funktioniert besser.
+    # 
+    # Außerdem braucht die Hydrate-Funktion die Spalte 'id', bisher hieß sie nr.
+    # Deshalb überall umbenannt. 
+    for p in posts:
+        if 'nr' in p:
+            p['id'] = p['nr']
+            del p['nr']
+    if 'media' not in posts[0] or posts[0]['media'] is None:
+        posts = pivot_to_media(posts)
+        hydrated_posts = asyncio.run(hydrate_async(posts, mdir))
+        return pivot_from_media(hydrated_posts)
+    else:
+        hydrated_posts = asyncio.run(hydrate_async(posts, mdir))
+        return hydrated_posts
+
+# Wrapper für die asynchrone Evaluate-Funktion
 def tg_evaluate(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
-    return asyncio.run(tg_evaluate_async(posts, check_texts=check_texts, check_images=check_images))
-
-async def process_media(session: aiohttp.ClientSession, post: Dict[str, Any]) -> List[asyncio.Task]:
-    tasks = []
-    media_types = ['video', 'photo', 'voice', 'sticker']
-
-    for media_type in media_types:
-        media = post.get(media_type)
-        if media and media.get('file'):
-            file_path = media['file']
-            if media_type in ['video', 'voice']:
-                tasks.append(transcribe_async(file_path))
-                tasks.append(aiornot_async(convert_mp4_to_mp3(file_path) if media_type == 'video' else file_path, is_image=False))
-            if media_type in ['photo', 'sticker']:
-                with open(file_path, 'rb') as f:
-                    image_data = base64.b64encode(f.read()).decode('utf-8')
-                tasks.append(describe_async(f"data:image/jpeg;base64, {image_data}"))
-                tasks.append(aiornot_async(file_path, is_image=True))
-        # Problem für die Probephase: 
-        # Hive ist rate-limited - ich kann die Aufrufe nur synchron starten; 
-        # das erledige ich beim Einbauen der Resultate. 
-#            tasks.append(hive_visual_async(session, file_path))
-
-    return tasks
-
-def assign_media_results(post: Dict[str, Any], results: List[Any], index: int) -> int:
-    media_types = [('video', 'transcription'), ('photo', 'description'), ('voice', 'transcription'), ('sticker', 'description')]
-
-    for media_type, result_key in media_types:
-        media = post.get(media_type)
-        if media and media.get('file'):
-            post[media_type][result_key] = results[index]
-            post['aiornot_ai_score'] = results[index + 1]
-            if media_type in ['video', 'photo', 'sticker']:
-                post['hive_visual_ai'] = hive_visual(media.get('file'))
-            index += 2
-
-    return index
+    # In den Telegram-Posts hat bislang dummerweise jeder Medien-Typ seine eigene Spalte. 
+    # Diese Logik funktioniert besser.
+    if 'media' not in posts[0] or posts[0]['media'] is None: 
+        posts = pivot_to_media(posts)
+        evaluated_posts = asyncio.run(evaluate_async(posts, check_texts=check_texts, check_images=check_images))
+        return pivot_from_media(evaluated_posts)
+    else:
+        evaluated_posts = asyncio.run(evaluate_async(posts, check_texts=check_texts, check_images=check_images))
+        return evaluated_posts
+    
+# Hilfsfunktion: Eingelesene Text-Spalten wieder in dict umwandeln   
+def convert_to_obj(val):
+    if pd.isna(val):
+        return None
+    try:
+        return ast.literal_eval(val)
+    except (ValueError, SyntaxError):
+        return val    
+    
+# Hilfsfunktion: CSV einlesen und als df ausgeben
+def tg_reimport_csv(fname):
+    df = pd.read_csv(fname)
+    # Beim Einlesen 'nr' in 'id' umbenennen (altes Format)
+    if 'nr' in df.columns:
+            if 'id' not in df.columns:
+                df.rename(columns={'nr': 'id'}, inplace=True)
+    # Diese Spalten sind dict:
+    structured_columns = ['media', 'photo', 'sticker', 'video', 'voice', 'forwards', 'links', 'aiornot_ai_score', 'hive_visual_ai']
+    for c in structured_columns:
+        if c in df.columns:
+            df[c] = df[c].apply(convert_to_obj)
+    return df

@@ -20,6 +20,8 @@ import logging
 from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
 from .check_wrappers import detectora_wrapper, aiornot_wrapper, transcribe_async, describe_async, detectora_async, aiornot_async, hive_visual, hive_visual_async
 from .save_urls import save_url_async, save_url
+from .hydrate import hydrate_async
+from .evaluate import evaluate_async
 
 # Sonstige Bibliotheken
 from ast import literal_eval # Strings in Objekte konvertieren
@@ -529,154 +531,18 @@ def igc_read_highlights(cname, save=False, describe=False):
 ########################################
 ### Block 3: Hydrieren und auswerten ###
 ########################################
-# Die Post-Dicts hydrieren, d.h.: die URLs dazu laden und abspeichern
-
-async def ig_hydrate_async(posts, mdir="./media"):
-    # Liest die Files der Videos, Fotos, Voice-Messages asynchron ein. 
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        for post in posts:
-            i = 0
-            if 'media' in post: 
-                id = post['id']
-                for m in post['media']: 
-                    type = m['type']
-                    url = m['url']
-                    tasks.append(save_url_async(session, url, f"{id}_{type}_{i}", mdir))
-                    i += 1
-                    
-        results = await asyncio.gather(*tasks)
-        # Assign results back to posts
-        index = 0
-        for post in posts:
-            if 'media' in post:
-                for item in post['media']:
-                    item['file'] = results[index]
-                    index += 1
-
-    return posts
 
 def ig_hydrate(posts, mdir="./media"):
-    return asyncio.run(ig_hydrate_async(posts, mdir))
+    return asyncio.run(hydrate_async(posts, mdir))
 
 def ig_evaluate(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
-    return asyncio.run(ig_evaluate_async(posts, check_texts=check_texts, check_images=check_images))
+    return asyncio.run(evaluate_async(posts, check_texts=check_texts, check_images=check_images))
 
 ## Routinen zum Check der letzten 20(...) Posts eines Telegram-Channels
 # analog zu check_handle in der check_bsky-Library
 #
 # Hinter den Kulissen werden Listen von Post-dicts genutzt
 
-# Routine checkt eine Post-Liste, wie sie aus den ig_post_parse Routinen kommen.
-# Wenn noch kein KI-Check vorliegt, wird er ergänzt. 
-# Setzt allerdings voraus, dass die entsprechenden Inhalte schon abgespeichert sind.
-# Routine fragt asynchron die APIs von AIORNOT und Hive ab
-# und lässt Audio-Inhalte transkribieren/Bilder beschreiben
-# Fügt folgende Spalten im Post-Dict hinzu:
-# - aiornot_ai_max_score
-# - hive_visual_ai_max_score
-#
-# In den Einträgen in der Liste in ['media'] werden die folgenden Keys in den Einträgen ergänzt:
-# - 'file' (Pfad zur Datei)
-# - 'transcription' (bei Videos) / 'description' (bei Bildern)
-# - 'aiornot_ai_score' (dict)
-#   - 'score'
-#   - 'confidence'
-#   - 'generator' (list)
-# - 'hive_visual_ai' (dict)
-#   - 'ai_score'
-#   - 'most_likely_model'
-#   - 'models' [ {'class': string, 'score': real}, ... ]
-
-# Die Routine kann auch nur die Texte oder nur die Bilder checken lassen.
-# Wenn check_texts = False, dann wird der Text nicht gecheckt.
-# Wenn check_images = False, dann werden die Bilder nicht gecheckt.
-
-async def ig_evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, check_images: bool = True) -> List[Dict[str, Any]]:
-    async with aiohttp.ClientSession() as session:
-# war mal für das asynchrone Auslesen der Hive-API, aber das geht nicht - siehe unten
-        tasks = []
-        # Semaphore to keep it to 3 calls at a time
-        semaphore = asyncio.Semaphore(2)
-        async def hive_visual_with_delay(file_path, semaphore):
-            async with semaphore:
-                result = await hive_visual_async(session,file_path)
-                await asyncio.sleep(.6)  # Rate limit delay
-                return result
-         
-        for post in posts:
-            if check_images:
-                for m in post['media']:
-                    media_type = m['type']
-                    file_path = m['file']
-                    # Transcription or description? Video gets transcription, image gets description
-                    if media_type == 'video': # Dann ist es ein Video
-                        tasks.append(transcribe_async(file_path))
-                        tasks.append(aiornot_async(convert_mp4_to_mp3(file_path), is_image=False))
-                    elif media_type == 'image':
-                        with open(file_path, 'rb') as f:
-                            image_data = base64.b64encode(f.read()).decode('utf-8')
-                        tasks.append(describe_async(f"data:image/jpeg;base64,{image_data}"))
-                        tasks.append(aiornot_async(file_path, is_image=True))
-                    # Add hive_visual_async task with rate limit
-                    tasks.append(hive_visual_with_delay(file_path, semaphore))
-                    
-                    # Hive Visual AI kann leider nicht asynchron abgefragt werden,
-                    # deshalb synchron und hoffentlich parallel zu den Transkriptionen und AiOrnot-Anfragen
-            if check_texts:
-                tasks.append(detectora_async(post.get('text','')))
-
-        results = await asyncio.gather(*tasks)
-
-        index = 0
-        for post in posts:
-            if check_images:
-                aiornot_max = 0
-                hive_max = 0
-                for m in post['media']:
-                    if m['type'] == 'image':
-                        m['description'] = results[index]
-                    else:
-                        m['transcription'] = results[index]
-                    aiornot = results[index+1]
-                    m['aiornot_ai_score'] = aiornot
-                    if aiornot is not None and aiornot_max < aiornot.get('confidence',0):
-                        aiornot_max = aiornot.get('confidence',0)
-                    hive = results[index+2]
-                    m['hive_visual_ai'] = hive
-                    index += 3
-                    # jetzt den jeweils höchsten HiveScore nehmen
-                    if hive is not None and hive_max < hive.get('ai_score',0):
-                        hive_max = hive.get('ai_score',0)
-                post['aiornot_ai_max_score'] = aiornot_max
-                post['hive_visual_ai_max_score'] = hive_max
-            if check_texts:
-                post['detectora_ai_score'] = results[index]
-                index += 1
-# Eingerückt für die ausgeklammerte with session Anweisung oben
-        return posts
-
-def ig_evaluate_old(posts, check_texts=True, check_images=True):
-    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
-    # und AIORNOT. 
-    for post in posts:
-        if ('detectora_ai_score' not in post) and check_texts:
-            # Noch keine KI-Einschätzung für den Text?
-            post['detectora_ai_score'] = detectora_wrapper(post.get('caption', ''))
-        if ('aiornot_ai_score' not in post) and check_images:
-            max_ai_score = 0
-            if post.get('videos'):
-                # Alle Videos analysieren und den höchsten Score ermitteln
-                for video_url in post['videos']:
-                    ai_score = aiornot_wrapper(convert_mp4_to_mp3(video_url), is_image=False)
-                    max_ai_score = max(max_ai_score, ai_score)
-            if post.get('images'):
-                # Alle Bilder analysieren und den höchsten Score ermitteln
-                for image_url in post['images']:
-                    ai_score = aiornot_wrapper(image_url, is_image=True)
-                    max_ai_score = max(max_ai_score, ai_score)
-            post['aiornot_ai_score'] = max_ai_score
-    return posts
 
 
 #### Handling der CSV
