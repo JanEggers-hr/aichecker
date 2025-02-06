@@ -6,6 +6,7 @@ import aiohttp
 from aiohttp import FormData
 from concurrent.futures import ThreadPoolExecutor
 import os
+import time
 import requests 
 from typing import List, Dict, Any, Optional
 
@@ -185,7 +186,7 @@ async def detectora_async(text):
 #   'most_likely_model': string,
 #   'models': [ {'class': string, 'score': real}, ... ]
 # }
-def hive_visual(content):
+def hive_visual_sync(content):
     url = 'https://api.thehive.ai/api/v2/task/sync'
     api_key = os.environ.get('HIVE_VISUAL_API_KEY')
     if api_key is None or api_key == "":
@@ -207,15 +208,23 @@ def hive_visual(content):
         response = requests.post(url, headers=headers, files=files)
         response = response.json()
     # Mit der Antwort weiter.
-    return evaluate_hive_visual(response)
+    return response
     
-def evaluate_hive_visual(response):
+def hive_visual(content):
+    response = hive_visual_sync(content)
+    return evaluate_hive_visual(response,content)
+    
+def evaluate_hive_visual(response, content):
         # Die ist mal ausnahmsweise kein Objekt, sondern ein dict...
     # ...das eine Liste enthält, von denen jedes ein dict ist...
     #... die in eine Liste verpackt sind... MÄÄN!
     if 'return_code' in response and response['return_code'] == 429:
-        logging.error("Hive Visual Detection: Rate Limit erreicht")
-        return None
+        # Try again after sleeping .5s  
+        time.sleep(0.5)
+        response = hive_visual_sync(content)
+        if 'return_code' in response and response['return_code'] == 429:
+            logging.error("Hive Visual Detection: Rate Limit erreicht")
+            return None
     scores = response['status'][0]['response']['output'][0]['classes']
     score = {'models': []}
     max = 0
@@ -254,7 +263,7 @@ async def hive_visual_async(session: aiohttp.ClientSession, content: str):
             return None
 
     async with session.post(url, headers=headers, data=form_data if form_data else data) as response:
-        await asyncio.sleep(1)  # Rate Limiting 1 Request per Second
         response_data = await response.json()
-
-    return evaluate_hive_visual(response_data)
+    
+    # Parameter nochmal mitgeben, um bei Rate Limit Exceeded nochmal probieren zu können
+    return evaluate_hive_visual(response_data, content)

@@ -154,6 +154,7 @@ def tg_post_parse(b):
     # Immer vorhanden: 
     # Postnummer, Zeitstempel (auch wenn er in Einzel-Posts als datetime auftaucht und in Channel_seiten als time)
     b_id = int(re.search(r'[0-9]+$', b.select_one("a.tgme_widget_message_date")['href']).group())
+    type = 'other'
     logging.info(f"Parse Telegram-Post Nr. {b_id}")
     if b.select_one("time.time") is not None:
         timestamp = isoparse(b.select_one("time.time")['datetime']).isoformat()
@@ -243,6 +244,9 @@ def tg_post_parse(b):
     # Document / Audio URL? https://t.me/telegram/35
     # Link-Preview: https://t.me/s/telegram/15
     
+    # Audio - kann ohne Anmeldung nicht gelesen werden
+    if b.select_one("div.tgme_widget_message_document") is not None:
+        text=b.select_one("div.tgme_widget_message_document_title").get_text()
 
     # Forwarded
     if b.select_one("a.tgme_widget_message_forwarded_from_name") is not None:
@@ -258,7 +262,8 @@ def tg_post_parse(b):
     poll_type = b.select_one("div.tgme_widget_message_poll_type")
     if poll_type is not None:
         poll_type = poll_type.get_text() # None wenn nicht vorhanden
-    
+    if type == 'other':
+        print(b_id)
     post_dict = {
         'channel': channel,
         'id': b_id,

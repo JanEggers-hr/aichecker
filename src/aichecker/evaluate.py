@@ -52,13 +52,20 @@ async def evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, 
         tasks = []
         # Semaphore to keep it to 2 calls at a time
         semaphore = asyncio.Semaphore(2)
-        async def hive_visual_with_delay(file_path, semaphore):
+        semaphore2 = asyncio.Semaphore(1)
+        async def hive_visual_with_delay(session, file_path, semaphore):
             async with semaphore:
                 result = await hive_visual_async(session,file_path)
                 await asyncio.sleep(1.1)  # Rate limit delay:
                 # According to Hive, the default is one query per second (be it over
                 # the sync oder async API. They have temporarily set this value to .5s for us
                 # but I tend to err on the side of caution.)
+                return result
+            
+        async def aiornot_async_with_delay(file_path, semaphore, is_image = True):
+            async with semaphore:
+                result = await aiornot_async(file_path, is_image = False)
+                await asyncio.sleep(1.1)
                 return result
          
         for post in posts:
@@ -81,14 +88,14 @@ async def evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, 
                         tasks.append(aiornot_async(file_path, is_image=True))
                     elif media_type == 'video': # Dann ist es ein Video
                         tasks.append(transcribe_async(file_path))
-                        tasks.append(aiornot_async(convert_mp4_to_mp3(file_path), is_image=False))
+                        tasks.append(aiornot_async_with_delay(convert_mp4_to_mp3(file_path), semaphore2, is_image=False))
                     elif media_type == 'voice':
                         if file_path.endswith('.oga') or file_path.endswith('.ogg'):
                             file_path = convert_ogg_to_mp3(file_path)
                         tasks.append(transcribe_async(file_path))
-                        tasks.append(aiornot_async(file_path, is_image=False))
+                        tasks.append(aiornot_async_with_delay(file_path, is_image=False))
                     # Add hive_visual_async task with rate limit
-                    tasks.append(hive_visual_with_delay(file_path, semaphore))
+                    tasks.append(hive_visual_with_delay(session, file_path, semaphore))
                     # Da hive ein Rate-Limit von 1s hat, habe ich hier ursprünglich synchron 
                     # gelesen; inzwischen umgestellt auf Asynchron. Siehe Definition oben.                   
             if check_texts and 'text' in post:
@@ -181,7 +188,10 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
         for m in post['media']:
             if m.get('type') == 'video':
                 n_videos += 1  
-                aiornot = m.get('aiornot_ai_score',{}).get('confidence')
+                if m.get('aiornot_ai_score') is not None:
+                    aiornot = m.get('aiornot_ai_score').get('confidence')
+                else:
+                    aiornot = None
                 hive = m.get('hive_visual',{}).get('ai_score')
                 if hive is None:
                     if aiornot is not None: 
@@ -192,7 +202,10 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
                     n_ai_videos +=1 if hive>= t_hive_visual and aiornot >= t_aiornot else 0
             if m.get('type') in ['sticker','image', 'photo']:
                 n_images += 1  
-                aiornot = m.get('aiornot_ai_score',{}).get('confidence')
+                if m.get('aiornot_ai_score') is not None:
+                    aiornot = m.get('aiornot_ai_score').get('confidence')
+                else:
+                    aiornot = None
                 hive = m.get('hive_visual',{}).get('ai_score')
                 if hive is None:
                     if aiornot is not None: 
@@ -203,6 +216,10 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
                     n_ai_images +=1 if hive>= t_hive_visual and aiornot >= t_aiornot else 0
             if m.get('type') in ['audio', 'voice']:
                 n_audios += 1
+                if m.get('aiornot_ai_score') is not None:
+                    aiornot = m.get('aiornot_ai_score').get('confidence')
+                else:
+                    aiornot = None
                 hive = m.get('hive_visual',{}).get('ai_score')
                 if hive is None:
                     if aiornot is not None: 
@@ -211,9 +228,6 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
                     n_ai_images += 1 if hive >= t_hive_visual else 0
                 else:
                     n_ai_images +=1 if hive>= t_hive_visual and aiornot >= t_aiornot else 0
-
-                
-        n_posts += 1
     if n_texts > 0:
         detectora_mean = round(n_ai_texts/n_texts,2)
     else:
@@ -228,7 +242,7 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
         hive_mean = 0
 
     eval_str = f'**Analysierte Posts:** {n_posts}\n\n'
-    eval_str += f"- **Texte über der KI-Schwelle von {t_detectora}:** {n_ai_texts} von {n_texts} ({detectora_mean})\n\n"
+    eval_str += f"- **Texte über der KI-Schwelle von {t_detectora}:** {n_ai_texts} von {n_texts} ({detectora_mean})\n"
     eval_str += f"- **Bilder über der KI-Schwelle von {t_aiornot}:** {n_ai_images} von {n_images}\n"
     eval_str += f"- **Videos mit KI-verdächtigem Audio/Video:** {n_ai_videos} von {n_videos}\n"
     eval_str += f"- **Voice Messages mit KI-verdächtigem Audio:** {n_ai_audios} von {n_audios}\n"
