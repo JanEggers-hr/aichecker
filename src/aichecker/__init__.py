@@ -7,4 +7,4 @@ from .check_tg import tgc_clean, tgc_read, tgc_blockread, tgc_read_url, tgc_prof
 from .check_ig import igc_profile, igc_read_posts, igc_read_posts_until, ig_evaluate, ig_hydrate, ig_reimport_csv, ig_append_csv, igc_clean, igc_read_stories, igc_read_highlights
 from .save_urls import save_url, save_url_async
 from .hydrate import serverize
-from .evaluate import evaluate_scans
+from .evaluate import evaluate_scans, eval_scans, evaluate_sync

@@ -32,6 +32,14 @@ from pathlib import Path
 from typing import List, Dict, Any
 import logging
 import base64
+import pandas as pd
+import os
+# Imports für den aufgehübschten XLSX-Export
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.worksheet.dimensions import ColumnDimension
+from openpyxl.styles import Alignment
+
 
 from .transcribe import gpt4_description, transcribe, convert_mp4_to_mp3, convert_ogg_to_mp3
 from .check_wrappers import detectora_wrapper, aiornot_wrapper, transcribe_async, describe_async, detectora_async, aiornot_async, hive_visual, hive_visual_async
@@ -143,9 +151,8 @@ async def evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, 
         return posts
 
 def evaluate_sync(posts, check_texts=True, check_images=True):
-    # Nimmt eine Liste von Posts und ergänzt KI-Einschätzung von Detectora
-    # und AIORNOT. 
-    # Synchron, also LAAAAANGSAM. 
+    # Synchrone, also LAAAAANGSAME KI-Bewertung der Medien
+    # mit Detectora, aiornot, und Hive. 
     for post in posts:
         if ('detectora_ai_score' not in post) and check_texts:
             # Noch keine KI-Einschätzung für den Text?
@@ -165,10 +172,10 @@ def evaluate_sync(posts, check_texts=True, check_images=True):
             post['aiornot_ai_score'] = max_ai_score
     return posts
 
-# Hilfsfunktion: ZÄhlt die Anzahl der Medien und produziert einen Markdown-String mit der Auswertung
+# Hilfsfunktion: Zählt die Anzahl der Medien und produziert einen Markdown-String mit der Auswertung
 # Immer die gleiche Struktur: Liste mit dict, in diesem dict ein Key 'media'... dort durchzählen. 
 
-def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
+def eval_scans(posts, t_detectora, t_aiornot, t_hive_visual):
     n_texts = 0
     n_videos = 0
     n_images = 0
@@ -177,7 +184,6 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
     n_ai_videos = 0
     n_ai_images = 0
     n_ai_audios = 0
-    n_posts = len(posts)
     
     for post in posts:
         if post['text'] is not None:
@@ -240,10 +246,123 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
         hive_mean = round(n_ai_videos/n_videos,2)
     else:
         hive_mean = 0
+    return {'n_texts': n_texts, 
+            'n_ai_texts': n_ai_texts, 
+            'n_images': n_images, 
+            'n_ai_images': n_ai_images, 
+            'n_videos': n_videos, 
+            'n_ai_videos': n_ai_videos, 
+            'n_audios': n_audios, 
+            'n_ai_audios': n_ai_audios, 
+            'detectora_mean': detectora_mean, 
+            'aiornot_mean': aiornot_mean, 
+            'hive_mean': hive_mean}
 
+def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
+    n_posts = len(posts)
+    e_dict = eval_scans(posts, t_detectora, t_aiornot, t_hive_visual)
+    
     eval_str = f'**Analysierte Posts:** {n_posts}\n\n'
-    eval_str += f"- **Texte über der KI-Schwelle von {t_detectora}:** {n_ai_texts} von {n_texts} ({detectora_mean})\n"
-    eval_str += f"- **Bilder über der KI-Schwelle von {t_aiornot}:** {n_ai_images} von {n_images}\n"
-    eval_str += f"- **Videos mit KI-verdächtigem Audio/Video:** {n_ai_videos} von {n_videos}\n"
-    eval_str += f"- **Voice Messages mit KI-verdächtigem Audio:** {n_ai_audios} von {n_audios}\n"
+    eval_str += f"- **Texte über der KI-Schwelle von {t_detectora}:** {e_dict['n_ai_texts']} von {e_dict['n_texts']}\n"
+    eval_str += f"- **Bilder über der KI-Schwelle von {t_aiornot}:** {e_dict['n_ai_images']} von {e_dict['n_images']}\n"
+    eval_str += f"- **Videos mit KI-verdächtigem Audio/Video:** {e_dict['n_ai_videos']} von {e_dict['n_videos']}\n"
+    eval_str += f"- **Voice Messages mit KI-verdächtigem Audio:** {e_dict['n_ai_audios']} von {e_dict['n_audios']}\n"
     return eval_str
+
+def most_likely_aiornot_model(aiornot):
+    # Liest die Generator-Keys aus und gibt das wahrscheinlichste zurück
+    generator = aiornot.get('generator', {})
+    model_str=""
+    for model in list(generator.keys()):
+        if generator[model].get('is_detected'):
+            model_str += f"{model} {generator[model].get('confidence')*100:.1f}% "
+    return model_str
+        
+
+def export_to_xlsx(posts, filename):
+    # Schreibt alle Spalten in eine Excel-Datei, die keine Objekte enthalten. Ausnahme: 
+    # Media wird "explodiert", d.h. neue Zeilen für jedes Medien-Objekt mit:
+    # type, url, description, aiornot_score, aiornot_guess, hive_score, hive_guess
+    fname = os.path.splitext(filename)[0]+".xlsx"
+    export_posts = []
+    for post in posts:
+        media = post.get('media', [])
+        post.pop('media')
+        post.pop('aiornot_ai_max_score')
+        post.pop('hive_visual_ai_max_score')
+        # Drop all keys containing objects
+        for key in list(post.keys()):
+            if isinstance(post[key], dict):
+                post.pop(key)
+
+        # Explode media
+        for m in media:
+            post['media_type'] = m['type']
+            post['file'] = m['file']
+            if m.get('description'):
+                post['description'] = m['description']
+            if m.get('transcription'):
+                post['transcription'] = m['transcription']
+            aiornot = m.get('aiornot_ai_score')
+            if aiornot:
+                post['aiornot_score'] = aiornot.get('confidence',None)
+                post['aiornot_guess'] =most_likely_aiornot_model(aiornot)
+            hive = m.get('hive_visual_ai')
+            if hive:
+                post['hive_score'] = hive.get('ai_score')
+                post['hive_guess'] = hive.get('most_likely_model')
+            export_posts.append(post.copy())
+        if 'media' in post:
+            media = post.get('media')
+            for m in media:
+                post
+        else:
+            export_posts.append(post)
+
+    df = pd.DataFrame(posts)
+        # Export als Workbook mit eingestellten Spaltenbreiten
+    try:
+        # Create a Workbook and select the active worksheet
+        wb = Workbook()
+        ws = wb.active
+
+        # Append the DataFrame to the worksheet
+        for r in dataframe_to_rows(df, index=False, header=True):
+            ws.append(r)
+
+        # Set column width
+        text_columns = {
+            'A': 20, # id
+            'B': 40, # text
+            'C': 10, # type
+            'D': 20, # timestamp
+            'E': 6, # detectora
+            'F': 6, # media_type
+            'G': 12, # file URL
+            'H': 6, # aiornot score
+            'I': 12, # aiornot guess
+            'J': 6, # hive score
+            'K': 12, # hive guess
+        }
+        
+        for col, width in text_columns.items():
+            ws.column_dimensions[col].width = width
+
+        # Apply text wrapping to the second column
+        def apply_text_wrapping(ws, column_index):
+            for row in ws.iter_rows(min_col=column_index, max_col=column_index, min_row=2, max_row=ws.max_row):
+                for cell in row:
+                    cell.alignment = Alignment(wrap_text=True)
+
+        # Apply text wrapping to the second column (column index 2)
+        # apply_text_wrapping(ws, 2)
+
+        # Save the workbook
+        wb.save(fname)
+        logging.debug(f"XLSX-Tabelle gespeichert: {fname}")
+        return(fname)
+
+    except Exception as e:
+        logging.error(f"Fehler beim Anlegen von {fname}: {e}")
+        df.to_excel(fname, index=False)
+    return fname

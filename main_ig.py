@@ -6,7 +6,7 @@ import argparse
 import pandas as pd
 
 # KONSTANTEN
-N = 50
+N = 30
 DETECTORA_T = 0.8 # 80%
 AIORNOT_T = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.    
 HIVE_T = 0.7
@@ -18,10 +18,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Analyze Instagram channels for AI-generated content.")
     parser.add_argument('--channel', type=str, help='Handle of the Instagram channel to analyze.')
     parser.add_argument('--channels', type=str, help='Comma-separated list of Instagram channel handles to analyze.')
-    parser.add_argument('--google-sheet', type=str, help='URL to a Google Sheet containing channel, scan1, scan2, scan3 columns.')
+    parser.add_argument('--google-sheet', type=str, help='ID of a Google Sheet containing channel column.')
+    parser.add_argument('--json', type=str, help='Path to JSON file containing the Google Sheet access credentials.')
     return parser.parse_args()
-
-
 
 if __name__ == "__main__":
     args = parse_arguments()

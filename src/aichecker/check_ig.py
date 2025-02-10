@@ -181,7 +181,11 @@ def ig_post_parse(instagram_data, save=False, describe=False):
         # Extract post details
         post_code = str(item.get('id', None))
         timestamp = datetime.fromtimestamp(item.get('taken_at_ts', 0)).isoformat()
-        caption = item.get('caption', {}).get('text', None)
+        if item.get('caption') is None:
+            item.pop('caption')
+            caption = None
+        else: 
+            caption = item.get('caption', {}).get('text', None)
         hashtags = item.get('caption', {}).get('hashtags', [])
         mentions = item.get('caption', {}).get('mentions', [])
         location = item.get('location', None)
@@ -273,7 +277,7 @@ def ig_post_parse(instagram_data, save=False, describe=False):
     
     return posts
 
-def igc_read_posts_until(cname, cutoff="1970-01-01T00:00:00", save=False, describe=False):
+def igc_read_posts_until(cname, cutoff="1970-01-00T00:00:00", save=False, describe=False):
     """ Liest ein Insta-Profil aus, bis das Cutoff-Datum erreicht ist oder nix mehr da.
 
     Args:
@@ -295,6 +299,8 @@ def igc_read_posts_until(cname, cutoff="1970-01-01T00:00:00", save=False, descri
     posts = []
     pagination_token = ""
     read_on = True
+    # Konvertiere in Unix-Timestamp
+    cutoff_unix = datetime.strptime(cutoff, "%Y-%m-%dT%H:%M:%S").timestamp()
     while read_on:
         if pagination_token == "":
             conn.request("GET", f"/v1.2/posts?username_or_id_or_url={cname}", headers=headers)
@@ -312,23 +318,24 @@ def igc_read_posts_until(cname, cutoff="1970-01-01T00:00:00", save=False, descri
         
         # Frühesten gelesenen Zeitstempel ermitteln
         try:
-            min_ts = min(d['taken_at_timestamp'] for d in data['data']['items'])
+            min_ts = min(d['taken_at_ts'] for d in data['data']['items'])
+            # Konvertiere min_ts in datetime isoformat
+            
         except ValueError as e:
             logging.error(f"Instagram-API-Fehler: Keine Daten? {e}")
             logging.error(f"data['data']['items']")
-        if min_ts <= cutoff:
+        if min_ts <= cutoff_unix:
             read_on = False
-            new_posts = [d for d in data['data']['items'] if d['taken_at_timestamp'] > cutoff]
+            new_posts = [d for d in data['data']['items'] if d['taken_at_ts'] > cutoff_unix]
             posts.extend(new_posts)
         else:
             posts.extend(data['data']['items'])
-        pagination_token = data.get('pagination', "")
 
         if not pagination_token:
             break
 
     # Die Posts parsen und die URLS der Videos und Fotos extrahieren
-    return ig_post_parse(posts[:n], save=save, describe=describe)
+    return ig_post_parse(posts, save=save, describe=describe)
 
 def igc_read_posts(cname, n=12, save=False, describe=False):
     """ Liest die n letzten Posts eines Instagram Profils aus.
@@ -373,7 +380,6 @@ def igc_read_posts(cname, n=12, save=False, describe=False):
             return []
 
         posts.extend(data['data']['items'])
-        pagination_token = data.get('pagination', "")
 
         if not pagination_token:
             break
