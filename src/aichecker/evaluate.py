@@ -271,7 +271,9 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
 
 def most_likely_aiornot_model(aiornot):
     # Liest die Generator-Keys aus und gibt das wahrscheinlichste zurück
-    generator = aiornot.get('generator', {})
+    generator = aiornot.get('generator')
+    if generator is None: 
+        return None
     model_str=""
     for model in list(generator.keys()):
         if generator[model].get('is_detected'):
@@ -298,7 +300,7 @@ def export_to_xlsx(posts, filename):
         # Explode media
         for m in media:
             post['media_type'] = m['type']
-            post['file'] = m['file']
+            post['file'] = f'=HYPERLINK("{m['file']}")'
             if m.get('description'):
                 post['description'] = m['description']
             if m.get('transcription'):

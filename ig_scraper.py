@@ -26,6 +26,9 @@ GSHEET = "1Tr1YU8zVu7AFBWy8HS9ZWVxFUgQPc51rvf-UlrXRXXM"
 GSHEET_KEY = "~/.ssh/scrapers-272317-564f299b0cd4.json"
 SAVE_PATH = '/../../html/frankruft/ig-checks'
 SERVER_PATH = 'https://frankruft.de/ig-checks/'
+logfile = "./" + f'ig_scraper_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
+logging.basicConfig(filename=logfile, level=logging.INFO)
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Analyze Instagram channels for AI-generated content.")
@@ -96,8 +99,6 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     # Local Logfile
-    logfile = save_dir + "/" + ts + '.log'
-    logging.basicConfig(filename=logfile, level=logging.DEBUG)
     logging.info('Start Instagram-Scan: ' + ts)
 
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -193,7 +194,7 @@ if __name__ == "__main__":
         # Dabei: Medienspalte "explodieren" (alles in eigene Zeile)
         # Trage im Google Sheet ein
         xlsx_url = SERVER_PATH + "/" + os.path.basename(xlsx_file)
-        sheet.update_cell(i,4, f"{xlsx_url}")
+        sheet.update_cell(i,4, f'=HYPERLINK("{m['file']}")')
         logging.info(f"Scan für {handle} erfolgreich abgeschlossen: {len(all_checked)} Posts, {len(checked_posts)} neue Posts, {len(checked_stories)} neue Stories, {len(checked_highlights)} neue Highlights")
         logging.info(f"XLSX-Datei: {xlsx_url}")
         # DONE
