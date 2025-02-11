@@ -25,7 +25,7 @@ T_HIVE = 0.7
 GSHEET = "1Tr1YU8zVu7AFBWy8HS9ZWVxFUgQPc51rvf-UlrXRXXM"
 GSHEET_KEY = "~/.ssh/scrapers-272317-564f299b0cd4.json"
 SAVE_PATH = '/../../html/frankruft/ig-checks'
-SERVER_PATH = 'https://frankruft.de/ig-checks/media'
+SERVER_PATH = 'https://frankruft.de/ig-checks/'
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Analyze Instagram channels for AI-generated content.")
@@ -55,7 +55,7 @@ def serverize(posts, server_path=SERVER_PATH):
     for post in posts:
         for m in post['media']:
             filename = os.path.basename(m['file'])
-            m['file'] = server_path + "/" + filename
+            m['file'] = server_path + "/media/" + filename
     return posts
 
 def remove_doubles(posts_new, posts_old):
@@ -87,7 +87,11 @@ if __name__ == "__main__":
     # Los geht's 
     ts = datetime.now().strftime("%Y-%m-%d")
     # Anlegen
-    save_dir = os.path.dirname(os.path.abspath(__file__)) + SAVE_PATH
+    #    save_dir = os.path.dirname(os.path.abspath(__file__)) + SAVE_PATH
+    if SAVE_PATH.startswith('/../') or SAVE_PATH.startswith('../') or SAVE_PATH.startswith('./'):
+        save_dir = os.path.dirname(os.path.abspath(__file__)) + SAVE_PATH
+    else:
+        save_dir = SAVE_PATH
     mdir = save_dir + '/media'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -107,13 +111,16 @@ if __name__ == "__main__":
     i = 2
     channels = []
     # Maximal 1000 
-    for i in range (2,1000): 
-        value = sheet.cell(i, 1).value  # Read cell A1
+    # Read first 200 elements of column A
+    values = sheet.col_values(1)[0:500]
+    for i in range (2,500): 
+        value = values[i-1]  # Read cell A2...
         if value == None:
             continue
         handle = igc_clean(value)
+        ts = datetime.now().isoformat()
+        print(f"Handle: {handle} um {ts}")
         channels.append(value)
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         logging.info(f"Start Scan {value} um {ts}")
         # Startzeit eintragen
         sheet.update_cell(i, 2, ts)
