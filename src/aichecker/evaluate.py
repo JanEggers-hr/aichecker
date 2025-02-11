@@ -300,7 +300,7 @@ def export_to_xlsx(posts, filename):
         # Explode media
         for m in media:
             post['media_type'] = m['type']
-            post['file'] = f'=HYPERLINK("{m['file']}")'
+            post['file'] = f'=HYPERLINK(\"{m["file"]}\")'
             if m.get('description'):
                 post['description'] = m['description']
             if m.get('transcription'):

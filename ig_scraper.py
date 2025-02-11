@@ -18,6 +18,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import logging
 
 # KONSTANTEN
+VERSION = "1.0 vom 11.02.2025"
 N = 30
 T_DETECTORA = 0.8 # 80%
 T_AIORNOT = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.    
@@ -26,8 +27,11 @@ GSHEET = "1Tr1YU8zVu7AFBWy8HS9ZWVxFUgQPc51rvf-UlrXRXXM"
 GSHEET_KEY = "~/.ssh/scrapers-272317-564f299b0cd4.json"
 SAVE_PATH = '/../../html/frankruft/ig-checks'
 SERVER_PATH = 'https://frankruft.de/ig-checks/'
-logfile = "./" + f'ig_scraper_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.log'
-logging.basicConfig(filename=logfile, level=logging.INFO)
+logfile = "./" + f'ig_scraper_{datetime.now().strftime("%Y-%m")}.log'
+logging.basicConfig(filename=logfile, 
+    filemode='a',  # 'a' mode appends to the file
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def parse_arguments():
@@ -68,6 +72,7 @@ def remove_doubles(posts_new, posts_old):
 
 
 if __name__ == "__main__":
+    logging.info(f"Version {VERSION}")
     args = parse_arguments()
     # Load the Google Sheet 
     if args.jsonpath:
@@ -113,7 +118,7 @@ if __name__ == "__main__":
     channels = []
     # Maximal 1000 
     # Read first 200 elements of column A
-    values = sheet.col_values(1)[0:500]
+    values = sheet.col_values(1)[0:501]
     for i in range (2,500): 
         value = values[i-1]  # Read cell A2...
         if value == None:
@@ -194,7 +199,7 @@ if __name__ == "__main__":
         # Dabei: Medienspalte "explodieren" (alles in eigene Zeile)
         # Trage im Google Sheet ein
         xlsx_url = SERVER_PATH + "/" + os.path.basename(xlsx_file)
-        sheet.update_cell(i,4, f'=HYPERLINK("{m['file']}")')
+        sheet.update_cell(i,4, f'=HYPERLINK(\"{xlsx_url}\")')
         logging.info(f"Scan für {handle} erfolgreich abgeschlossen: {len(all_checked)} Posts, {len(checked_posts)} neue Posts, {len(checked_stories)} neue Stories, {len(checked_highlights)} neue Highlights")
         logging.info(f"XLSX-Datei: {xlsx_url}")
         # DONE
