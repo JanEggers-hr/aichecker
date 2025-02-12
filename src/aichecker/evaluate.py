@@ -279,7 +279,9 @@ def evaluate_scans(posts, t_detectora, t_aiornot, t_hive_visual):
 
 def most_likely_aiornot_model(aiornot):
     # Liest die Generator-Keys aus und gibt das wahrscheinlichste zurück
-    generator = aiornot.get('generator', {})
+    generator = aiornot.get('generator')
+    if generator is None: 
+        return None
     model_str=""
     for model in list(generator.keys()):
         if generator[model].get('is_detected'):
@@ -306,7 +308,7 @@ def export_to_xlsx(posts, filename):
         # Explode media
         for m in media:
             post['media_type'] = m['type']
-            post['file'] = m['file']
+            post['file'] = f'=HYPERLINK(\"{m["file"]}\")'
             if m.get('description'):
                 post['description'] = m['description']
             if m.get('transcription'):
@@ -328,6 +330,12 @@ def export_to_xlsx(posts, filename):
             export_posts.append(post)
 
     df = pd.DataFrame(posts)
+    # Sortiere nach id und Datum
+    df = df.sort_values(by='timestamp', ascending=False)
+    # Spalte id in string umwandeln
+    df['id'] = df['id'].astype(str)
+    # Spalte timestamp in datetime umwandeln   
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
         # Export als Workbook mit eingestellten Spaltenbreiten
     try:
         # Create a Workbook and select the active worksheet

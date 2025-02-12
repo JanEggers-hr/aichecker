@@ -16,16 +16,24 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import logging
+import time
 
 # KONSTANTEN
+VERSION = "1.0 vom 11.02.2025"
 N = 30
 T_DETECTORA = 0.8 # 80%
 T_AIORNOT = 0.5 # 50% - AIORNOT selbst setzt den Wert sehr niedrig an.    
 T_HIVE = 0.7
 GSHEET = "1Tr1YU8zVu7AFBWy8HS9ZWVxFUgQPc51rvf-UlrXRXXM"
-GSHEET_KEY = "~/.ssh/scrapers-272317-564f299b0cd4.json"
-SAVE_PATH = '/../../html/frankruft/ig-checks'
+GSHEET_KEY = "~/.ssh/scrapers.json"
+SAVE_PATH = '/../html/frankruft/ig-checks'
 SERVER_PATH = 'https://frankruft.de/ig-checks/'
+
+logfile = os.path.dirname(os.path.abspath(__file__)) + f'/ig_scraper_{datetime.now().strftime("%Y-%m")}.log'
+logging.basicConfig(filename=logfile, 
+    filemode='a',  # 'a' mode appends to the file
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s')
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Analyze Instagram channels for AI-generated content.")
@@ -37,17 +45,31 @@ def parse_arguments():
     parser.add_argument('--serverpath', type=str, help='Server path to refer files from outside')
     return parser.parse_args()
 
+def gwrite(sheet,x,y, s):
+    try:
+        sheet.update_cell(y, x, s)
+        time.sleep(1)
+    except Exception as e:
+        logging.error(f"Error writing to Google Sheet: {e}")
+        if '429' in str(e):
+            time.sleep(10)
+            sheet.update_cell(y, x, s)
+        else:
+            raise e
+        return False
+    return True 
+
 def write_statistics_to_gsheet(posts):
-    sheet.update_cell(i,5, len(posts))
+    gwrite(sheet, 5,i, len(posts))
     # Letzter gelesener
-    sheet.update_cell(i, 7, last_ts)
+    gwrite(sheet, 7, i, last_ts)
     # Auswertung der Posts in die Tabelle 
     eval = eval_scans(posts, T_DETECTORA, T_AIORNOT, T_HIVE)
-    sheet.update_cell(i, 6, eval['n_images']+eval['n_videos']+eval['n_audios'])
-    sheet.update_cell(i, 8, eval['n_ai_texts'])
-    sheet.update_cell(i, 9, eval['n_ai_images'])
-    sheet.update_cell(i, 10, eval['n_ai_videos'])
-    sheet.update_cell(i, 11, eval['n_ai_audios'])   
+    gwrite(sheet, 6, i, eval['n_images']+eval['n_videos']+eval['n_audios'])
+    gwrite(sheet, 8, i, eval['n_ai_texts'])
+    gwrite(sheet, 9, i, eval['n_ai_images'])
+    gwrite(sheet, 10, i, eval['n_ai_videos'])
+    gwrite(sheet, 11, i, eval['n_ai_audios'])   
     return
 
 # Hilfsfunktion: Alle Bild- und Medien-URL umbauen auf Server frankruft.de/ig-checks/media/{file}
@@ -65,6 +87,7 @@ def remove_doubles(posts_new, posts_old):
 
 
 if __name__ == "__main__":
+    logging.info(f"Version {VERSION}")
     args = parse_arguments()
     # Load the Google Sheet 
     if args.jsonpath:
@@ -95,9 +118,11 @@ if __name__ == "__main__":
     mdir = save_dir + '/media'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
+    if not os.path.exists(mdir):
+        os.makedirs(mdir)
+    # Logging
+    logging.basicConfig(filename=save_dir + '/ig_scraper.log', level=logging.INFO, format='%(asctime)s %(message)s')
     # Local Logfile
-    logfile = save_dir + "/" + ts + '.log'
-    logging.basicConfig(filename=logfile, level=logging.DEBUG)
     logging.info('Start Instagram-Scan: ' + ts)
 
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -112,8 +137,8 @@ if __name__ == "__main__":
     channels = []
     # Maximal 1000 
     # Read first 200 elements of column A
-    values = sheet.col_values(1)[0:500]
-    for i in range (2,500): 
+    values = sheet.col_values(1)[0:1000]
+    for i in range (2,200): 
         value = values[i-1]  # Read cell A2...
         if value == None:
             continue
@@ -123,19 +148,19 @@ if __name__ == "__main__":
         channels.append(value)
         logging.info(f"Start Scan {value} um {ts}")
         # Startzeit eintragen
-        sheet.update_cell(i, 2, ts)
+        gwrite(sheet, 2, i, ts)
         profile = igc_profile(handle)
         if profile == None:
-            sheet.update_cell(i, 3, f"NICHT GEFUNDEN")            
+            gwrite(sheet, 3, i, f"NICHT GEFUNDEN")            
             continue
-        sheet.update_cell(i, 3, f"Bio: '{profile['biography']}'")
+        gwrite(sheet, 3, i, f"Bio: '{profile['biography']}'")
                 
         # Bild abspeichern (ist nicht hydriert)
         image_url = profile.get('profile_pic_url')
         image_file = save_url(image_url,f"{handle}_profile",save_dir)
         # Gleich auf KI checken
         image_chk = hive_visual(image_file)
-        sheet.update_cell(i, 3, f"KI Profilbild: {image_chk['ai_score']*100:.1f}%")
+        gwrite(sheet, 3, i, f"KI Profilbild: {image_chk['ai_score']*100:.1f}%")
         filename = f'{save_dir}/{handle}.csv'
         # Checken: Gibt es schon ein CSV?
         if os.path.exists(filename):
@@ -150,20 +175,20 @@ if __name__ == "__main__":
         else: # kein CSV
             posts = igc_read_posts(handle, N)
             if len(posts) == 0: 
-                sheet.update_cell(i, 3, f"KEINE POSTS")    
+                gwrite(sheet, 3, i, f"KEINE POSTS")    
                 continue
             old_posts = []
             last_ts = min(p['timestamp'] for p in posts)
         # Neue Posts hydrieren
         hydrated_posts = ig_hydrate(posts, mdir)
         # Anzahl der gespeicherten Medien ausgeben
-        sheet.update_cell(i, 3, f"Neue Posts: {len(posts)}, checke auf KI...")
+        gwrite(sheet, 3, i, f"Neue Posts: {len(posts)}, checke auf KI...")
         checked_posts = ig_evaluate(hydrated_posts)
         write_statistics_to_gsheet(checked_posts)
         # Jetzt: Stories
         stories = igc_read_stories(handle)
         if len(stories) > 0:
-            sheet.update_cell(i, 3, f"Stories: {len(stories)}, checke auf KI...")
+            gwrite(sheet, 3, i, f"Stories: {len(stories)}, checke auf KI...")
             hydrated_stories = ig_hydrate(stories, mdir)
             checked_stories = ig_evaluate(hydrated_stories)
         else:
@@ -173,7 +198,7 @@ if __name__ == "__main__":
         # Schauen, welche schon in den Stories drin sind
         highlights_n = remove_doubles(highlights, old_posts)
         if len(highlights_n) > 0: 
-            sheet.update_cell(i, 3, f"Neue Highlights: {len(highlights_n)}, checke auf KI...")
+            gwrite(sheet, 3, i, f"Neue Highlights: {len(highlights_n)}, checke auf KI...")
             hydrated_highlights = ig_hydrate(highlights_n, mdir)
             checked_highlights = ig_evaluate(hydrated_highlights)
         else:
@@ -181,10 +206,10 @@ if __name__ == "__main__":
         # DONE: Speichere ergänztes CSV
         all_checked = old_posts + checked_posts + checked_stories + checked_highlights
         if len(all_checked) == 0: 
-            sheet.update_cell(i, 3, f"OK - kein Update")
+            gwrite(sheet, 3, i, f"OK - kein Update")
             continue
         write_statistics_to_gsheet(all_checked)
-        sheet.update_cell(i, 3, f"OK")
+        gwrite(sheet, 3, i, f"OK")
         all_posts = serverize(all_checked)
         df = pd.DataFrame(all_posts)
         df.to_csv(filename, index=False)
@@ -193,7 +218,7 @@ if __name__ == "__main__":
         # Dabei: Medienspalte "explodieren" (alles in eigene Zeile)
         # Trage im Google Sheet ein
         xlsx_url = SERVER_PATH + "/" + os.path.basename(xlsx_file)
-        sheet.update_cell(i,4, f"{xlsx_url}")
+        gwrite(sheet, 4, i, f'=HYPERLINK(\"{xlsx_url}\")')
         logging.info(f"Scan für {handle} erfolgreich abgeschlossen: {len(all_checked)} Posts, {len(checked_posts)} neue Posts, {len(checked_stories)} neue Stories, {len(checked_highlights)} neue Highlights")
         logging.info(f"XLSX-Datei: {xlsx_url}")
         # DONE

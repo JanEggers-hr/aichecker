@@ -67,10 +67,12 @@ def igc_profile(username="mrbeast"):
         'x-rapidapi-key': os.getenv('RAPIDAPI_KEY'),
         'x-rapidapi-host': "instagram-scraper-api2.p.rapidapi.com"
     }
+    logging.info(f"Queriying profile for {username} with API key {headers['x-rapidapi-key'][:5]}...")
 
     try:
         conn.request("GET", f"/v1/info?username_or_id_or_url={username}&include_about=true", headers=headers)
         res = conn.getresponse()
+        logging.info(f"RAPID API returning status {res.status}")
         data = json.loads(res.read().decode("utf-8")).get('data', {})
         query_ts = datetime.now().isoformat()
     except Exception as e:
