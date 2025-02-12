@@ -225,6 +225,12 @@ def evaluate_hive_visual(response, content):
         if 'return_code' in response and response['return_code'] == 429:
             logging.error("Hive Visual Detection: Rate Limit erreicht")
             return None
+    if 'return_code' in response and response['return_code'] != 200:
+        logging.error(f"Hive Visual Detection: Fehler {response['return_code']}")
+        return None
+    if 'status' not in response:
+        logging.error("Hive Visual Detection: Kein Status in der Antwort")
+        return None
     scores = response['status'][0]['response']['output'][0]['classes']
     score = {'models': []}
     max = 0

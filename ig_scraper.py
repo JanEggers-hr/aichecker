@@ -48,7 +48,7 @@ def parse_arguments():
 def gwrite(sheet,x,y, s):
     try:
         sheet.update_cell(y, x, s)
-        time.sleep(1)
+        time.sleep(.1)
     except Exception as e:
         logging.error(f"Error writing to Google Sheet: {e}")
         if '429' in str(e):
@@ -81,9 +81,10 @@ def serverize(posts, server_path=SERVER_PATH):
     return posts
 
 def remove_doubles(posts_new, posts_old):
-    existing_ids = [post['id'] for post in posts_old]
-    posts_new = [post for post in posts_new if post['id'] not in existing_ids]
-    return posts_new
+    # In Strings verwandeln, weil Reimport aus den IDs leider Nummern macht
+    existing_ids = [str(post['id']) for post in posts_old]
+    posts_filtered = [p for p in posts_new if str(p['id']) not in existing_ids]
+    return posts_filtered
 
 
 if __name__ == "__main__":
