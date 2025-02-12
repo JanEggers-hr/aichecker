@@ -92,3 +92,6 @@ Direkt aus dem Repository installieren:
 - AIORNOT ist sehr begrenzt! Standardmodell: 100 API-Calls pro Monat für 5$ (bei Abschluss Jahresabo). Über Enterprise-Zugang gibt es kein Limit mehr, da kosten 10000 Calls 500$ (und darüber hinaus 4 Cent).
 - Immer dran denken: Die Detektoren liefern Wahrscheinlichkeiten, keine Gewissheiten. 
 
+## Hive und Videos
+
+Meine Experimente haben über die Videos unsere Goodwill-Credits bei Hive verbrannt, weil nach Sekunden abgerechnet wird - für den Produktivbetrieb sollte die Erkennung auf drei Sekunden aus dem Video beschränkt werden. 

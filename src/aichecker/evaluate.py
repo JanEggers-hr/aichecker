@@ -94,6 +94,10 @@ async def evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, 
                             image_data = base64.b64encode(f.read()).decode('utf-8')
                         tasks.append(describe_async(f"data:image/jpeg;base64,{image_data}"))
                         tasks.append(aiornot_async(file_path, is_image=True))
+                        # Add hive_visual_async task with rate limit
+                        # Kein Hive für Video-wird zu teuer; erst eine Routine implementieren, 
+                        # die den Scan auf einen 3-Sekunden-Schnipsel beschränkt. 
+                        tasks.append(hive_visual_with_delay(session, file_path, semaphore))
                     elif media_type == 'video': # Dann ist es ein Video
                         tasks.append(transcribe_async(file_path))
                         tasks.append(aiornot_async_with_delay(convert_mp4_to_mp3(file_path), semaphore2, is_image=False))
@@ -102,8 +106,7 @@ async def evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, 
                             file_path = convert_ogg_to_mp3(file_path)
                         tasks.append(transcribe_async(file_path))
                         tasks.append(aiornot_async_with_delay(file_path, is_image=False))
-                    # Add hive_visual_async task with rate limit
-                    tasks.append(hive_visual_with_delay(session, file_path, semaphore))
+
                     # Da hive ein Rate-Limit von 1s hat, habe ich hier ursprünglich synchron 
                     # gelesen; inzwischen umgestellt auf Asynchron. Siehe Definition oben.                   
             if check_texts and 'text' in post:
@@ -132,9 +135,14 @@ async def evaluate_async(posts: List[Dict[str, Any]], check_texts: bool = True, 
                     m['aiornot_ai_score'] = aiornot
                     if aiornot is not None and aiornot_max < aiornot.get('confidence',0):
                         aiornot_max = aiornot.get('confidence',0)
-                    hive = results[index]
-                    m['hive_visual_ai'] = hive
-                    index += 1
+                        
+                    # Kein Hive für Videos
+                    if m['type'] in ['image', 'sticker', 'photo']:
+                        hive = results[index]
+                        m['hive_visual_ai'] = hive
+                        index += 1
+                    else:
+                        hive = None
                     # jetzt den jeweils höchsten HiveScore nehmen
                     if hive is not None and hive_max < hive.get('ai_score',0):
                         hive_max = hive.get('ai_score',0)
